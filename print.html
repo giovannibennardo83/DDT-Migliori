@@ -7,63 +7,71 @@
     <link rel="stylesheet" href="print.css" />
   </head>
   <body>
-    <div class="sheet">
-      <div class="head">
-        <div class="head-main">
-          <div class="doc-title">DDT - Documento di Trasporto</div>
-          <div id="mittente" class="fixed-block"></div>
-        </div>
-        <div class="meta">
-          <div class="meta-box">
-            <div class="meta-label">Numero DDT</div>
-            <div id="numero" class="meta-value"></div>
+    <div id="sheets"></div>
+
+    <template id="sheet-template">
+      <div class="sheet">
+        <div class="head">
+          <div class="head-main">
+            <div class="doc-title">DDT - Documento di Trasporto</div>
+            <div data-field="mittente" class="fixed-block"></div>
           </div>
-          <div class="meta-box">
-            <div class="meta-label">Data</div>
-            <div id="data" class="meta-value"></div>
+          <div class="meta">
+            <div class="meta-box">
+              <div class="meta-label">Numero DDT</div>
+              <div data-field="numero" class="meta-value"></div>
+            </div>
+            <div class="meta-box">
+              <div class="meta-label">Data</div>
+              <div data-field="data" class="meta-value"></div>
+            </div>
+            <div class="meta-box page-box" data-field="pagina-box" hidden>
+              <div class="meta-label">Pagina</div>
+              <div data-field="pagina" class="meta-value"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="main-box">
+          <div class="box-title">Cliente / Destinatario</div>
+          <div data-field="cliente" class="cliente-box fixed-block"></div>
+
+          <div class="causale"><strong>CAUSALE DEL TRASPORTO:</strong> <span data-field="causale"></span></div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Ref</th>
+                <th>Descrizione</th>
+                <th>Lot</th>
+                <th>Quantità</th>
+              </tr>
+            </thead>
+            <tbody data-field="rows"></tbody>
+          </table>
+        </div>
+
+        <div class="final">
+          <div class="line"><strong>Iniziali Paziente:</strong> <span data-field="iniziali"></span></div>
+          <div class="line"><strong>N. cartella Clinica:</strong> <span data-field="cartella"></span></div>
+
+          <div style="margin-top: 8px;"><strong>TRASPORTO A MEZZO:</strong></div>
+          <div>□ MITTENTE &nbsp;&nbsp;&nbsp; □ VETTORE &nbsp;&nbsp;&nbsp; □ DESTINATARIO</div>
+          <div>PORTO Franco</div>
+
+          <div class="sign">
+            <div class="firma-mittente-block">
+              <img class="firma-mittente-img" src="assets/firma_gio.png" alt="Firma mittente" onerror="this.style.display='none'" />
+              <div>FIRMA MITTENTE ______________________</div>
+            </div>
+            <div class="firma-destinatario-block">
+              <div data-field="firmaDestinatario" class="firma-destinatario-container" aria-hidden="true"></div>
+              <div>FIRMA DESTINATARIO __________________</div>
+            </div>
           </div>
         </div>
       </div>
-
-      <div class="main-box">
-        <div class="box-title">Cliente / Destinatario</div>
-        <div id="cliente" class="cliente-box fixed-block"></div>
-
-        <div class="causale"><strong>CAUSALE DEL TRASPORTO:</strong> <span id="causale"></span></div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Ref</th>
-              <th>Descrizione</th>
-              <th>Lot</th>
-              <th>Quantità</th>
-            </tr>
-          </thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </div>
-
-      <div class="final">
-        <div class="line"><strong>Iniziali Paziente:</strong> <span id="iniziali"></span></div>
-        <div class="line"><strong>N. cartella Clinica:</strong> <span id="cartella"></span></div>
-
-        <div style="margin-top: 8px;"><strong>TRASPORTO A MEZZO:</strong></div>
-        <div>□ MITTENTE &nbsp;&nbsp;&nbsp; □ VETTORE &nbsp;&nbsp;&nbsp; □ DESTINATARIO</div>
-        <div>PORTO Franco</div>
-
-        <div class="sign">
-          <div class="firma-mittente-block">
-            <img class="firma-mittente-img" src="assets/firma_gio.png" alt="Firma mittente" onerror="this.style.display='none'" />
-            <div>FIRMA MITTENTE ______________________</div>
-          </div>
-          <div class="firma-destinatario-block">
-            <div id="firmaDestinatarioContainer" class="firma-destinatario-container" aria-hidden="true"></div>
-            <div>FIRMA DESTINATARIO __________________</div>
-          </div>
-        </div>
-      </div>
-    </div>
+    </template>
 
     <script>
       const MITTENTE_FISSO = [
@@ -75,7 +83,13 @@
         'Tel. 095 7894844 - Fax 095 7895283'
       ].join('\n');
 
+      // Righe stampate per pagina: il modulo prestampato ne prevede 12.
+      const ROWS_PER_PAGE = 12;
+
       const raw = localStorage.getItem('printDDT');
+      const sheetsNode = document.getElementById('sheets');
+      const sheetTemplate = document.getElementById('sheet-template');
+
       function formatDisplayDate(value) {
         const input = String(value || '').trim();
         const match = input.match(/^(\d{4})[-/](\d{2})[-/](\d{2})$/);
@@ -84,37 +98,88 @@
         return `${day}/${month}/${year}`;
       }
 
+      function emptyRiga() {
+        return { codice_articolo: '', description: '', lotto: '', quantita: '' };
+      }
+
+      function chunkRighe(righe) {
+        const pages = [];
+
+        for (let i = 0; i < righe.length; i += ROWS_PER_PAGE) {
+          pages.push(righe.slice(i, i + ROWS_PER_PAGE));
+        }
+
+        if (pages.length === 0) pages.push([]);
+
+        return pages;
+      }
+
+      function renderFirmaDestinatario(container, firmaDestinatario) {
+        if (!firmaDestinatario) return;
+
+        const firmaImg = document.createElement('img');
+        firmaImg.className = 'firma-destinatario-img';
+        firmaImg.alt = 'Firma destinatario';
+        firmaImg.src = firmaDestinatario;
+        firmaImg.loading = 'eager';
+        firmaImg.decoding = 'sync';
+        firmaImg.onerror = function () {
+          this.remove();
+          container.setAttribute('aria-hidden', 'true');
+        };
+        container.appendChild(firmaImg);
+        container.setAttribute('aria-hidden', 'false');
+      }
+
+      function buildSheet(ddt, righePagina, pageIndex, pageCount) {
+        const sheet = sheetTemplate.content.firstElementChild.cloneNode(true);
+        const field = (name) => sheet.querySelector(`[data-field="${name}"]`);
+        const cliente = ddt.cliente || {};
+
+        field('numero').textContent = ddt.numero || '';
+        field('data').textContent = formatDisplayDate(ddt.data);
+        field('cliente').textContent = [cliente.riga1, cliente.riga2, cliente.riga3].filter(Boolean).join('\n');
+        field('mittente').textContent = MITTENTE_FISSO;
+        field('causale').textContent = ddt.causale_trasporto || '';
+        field('iniziali').textContent = ddt.iniziali_paziente || '';
+        field('cartella').textContent = ddt.cartella_clinica || '';
+
+        // Il riquadro pagina compare solo sui documenti multipagina, così la stampa
+        // a pagina singola resta identica al modulo storico.
+        if (pageCount > 1) {
+          field('pagina-box').hidden = false;
+          field('pagina').textContent = `${pageIndex + 1} di ${pageCount}`;
+        } else {
+          // Rimosso e non solo nascosto: `.meta-box:last-child` deve continuare a
+          // individuare il riquadro Data per la gestione del bordo inferiore.
+          field('pagina-box').remove();
+        }
+
+        renderFirmaDestinatario(field('firmaDestinatario'), String(ddt.firma_destinatario || '').trim());
+
+        const rowsNode = field('rows');
+        const righe = righePagina.slice();
+
+        while (righe.length < ROWS_PER_PAGE) {
+          righe.push(emptyRiga());
+        }
+
+        righe.forEach((riga) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${riga.codice_articolo}</td><td class="description">${riga.description}</td><td>${riga.lotto}</td><td class="qty">${riga.quantita}</td>`;
+          rowsNode.appendChild(tr);
+        });
+
+        return sheet;
+      }
+
       if (!raw) {
-        document.getElementById('rows').innerHTML = '<tr><td colspan="4">Nessun DDT disponibile.</td></tr>';
+        const sheet = sheetTemplate.content.firstElementChild.cloneNode(true);
+        sheet.querySelector('[data-field="rows"]').innerHTML = '<tr><td colspan="4">Nessun DDT disponibile.</td></tr>';
+        sheetsNode.appendChild(sheet);
       } else {
         const ddt = JSON.parse(raw);
-        const cliente = ddt.cliente || {};
         const righe = Array.isArray(ddt.righe) ? ddt.righe : [];
-
-        document.getElementById('numero').textContent = ddt.numero || '';
-        document.getElementById('data').textContent = formatDisplayDate(ddt.data);
-        document.getElementById('cliente').textContent = [cliente.riga1, cliente.riga2, cliente.riga3].filter(Boolean).join('\n');
-        document.getElementById('mittente').textContent = MITTENTE_FISSO;
-        document.getElementById('causale').textContent = ddt.causale_trasporto || '';
-        document.getElementById('iniziali').textContent = ddt.iniziali_paziente || '';
-        document.getElementById('cartella').textContent = ddt.cartella_clinica || '';
-
-        const firmaDestinatario = String(ddt.firma_destinatario || '').trim();
-        if (firmaDestinatario) {
-          const firmaContainer = document.getElementById('firmaDestinatarioContainer');
-          const firmaImg = document.createElement('img');
-          firmaImg.className = 'firma-destinatario-img';
-          firmaImg.alt = 'Firma destinatario';
-          firmaImg.src = firmaDestinatario;
-          firmaImg.loading = 'eager';
-          firmaImg.decoding = 'sync';
-          firmaImg.onerror = function () {
-            this.remove();
-            firmaContainer.setAttribute('aria-hidden', 'true');
-          };
-          firmaContainer.appendChild(firmaImg);
-          firmaContainer.setAttribute('aria-hidden', 'false');
-        }
 
         const normalized = righe.map((r) => ({
           codice_articolo: String(r.codice_articolo || '').trim(),
@@ -123,15 +188,10 @@
           quantita: Math.max(1, Number(r.quantita) || 1)
         }));
 
-        while (normalized.length < 12) {
-          normalized.push({ codice_articolo: '', description: '', lotto: '', quantita: '' });
-        }
+        const pages = chunkRighe(normalized);
 
-        const rowsNode = document.getElementById('rows');
-        normalized.slice(0, 12).forEach((riga) => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${riga.codice_articolo}</td><td class="description">${riga.description}</td><td>${riga.lotto}</td><td class="qty">${riga.quantita}</td>`;
-          rowsNode.appendChild(tr);
+        pages.forEach((righePagina, index) => {
+          sheetsNode.appendChild(buildSheet(ddt, righePagina, index, pages.length));
         });
 
         window.print();

@@ -21,9 +21,16 @@ td.qty { text-align: center; width: 60px; }
 .final { margin-top: auto; border: 1px solid #222; border-top: 0; padding: 8px; line-height: 1.6; page-break-inside: avoid; break-inside: avoid; }
 .final .line { display: flex; gap: 10px; }
 .sign { margin-top: 14px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid; break-inside: avoid; }
+/* Ogni .sheet è una pagina completa del modulo: interruzione dopo, tranne l'ultima
+   per non generare una pagina bianca finale. */
+.sheet { page-break-after: always; break-after: page; }
+.sheet:last-child { page-break-after: auto; break-after: auto; }
+.page-box[hidden] { display: none; }
+
 @media screen {
   body { background: #e2e8f0; padding: 12px; }
   .sheet { background: #fff; padding: 4mm; }
+  .sheet + .sheet { margin-top: 12px; }
 }
 
 td.description { white-space: normal; word-break: break-word; }
