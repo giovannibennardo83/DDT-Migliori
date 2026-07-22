@@ -39,7 +39,7 @@ Struttura dei dati persistiti dall'applicazione, regole di normalizzazione e mig
 | Campo | Tipo | Note |
 | --- | --- | --- |
 | `id` | `string` | UUID generato con `crypto.randomUUID()`; fallback `ddt-<timestamp>-<random>`. Chiave primaria per il merge. |
-| `numero` | `string` | Numero documento, formato `AAPPPAGE` (vedi §5). |
+| `numero` | `string` | Numero documento, formato `<AA><PPP><CODICEAGENTE>` (vedi §5). |
 | `data` | `string` | Data documento in formato ISO `AAAA-MM-GG`. |
 | `cliente` | `object` | Destinatario su tre righe libere (vedi §3). |
 | `causale_trasporto` | `string` | Causale del trasporto. |
@@ -87,6 +87,12 @@ invece di `riga1`, viene mappato su `riga1`.
 | `lotto` | `string` | LOT del dispositivo; stringa vuota se assente. |
 | `quantita` | `number` | Intero, minimo `1`. Valori non validi collassano a `1`. |
 
+**Numero di righe.** L'array `righe` **non ha un limite superiore**: un DDT può contenerne quante
+ne servono. Le 12 righe per pagina della stampa sono la capienza del modulo, non un vincolo del modello
+dati. Nessuno dei passaggi di persistenza — `extractAndValidateRighe()` in `app.js`,
+`normalizeDDTStorage()` / `normalizeRigaStorage()` in `db.js`, il payload di backup (§8) — applica
+tagli o soglie, e non devono essere introdotti.
+
 **Compatibilità.** I campi legacy `descrizione` e `articolo` vengono mappati su
 `codice_articolo`, con precedenza `codice_articolo` → `descrizione` → `articolo`.
 Un DDT legacy privo di `righe` ma con `articolo`/`descrizione` a livello di testata viene
@@ -96,20 +102,45 @@ convertito in un documento con una singola riga.
 
 ## 5. Numerazione
 
-Formato: **`AAPPPAGE`** — esempio `26001GBE`.
+Formato: **`<AA><PPP><CODICEAGENTE>`**
 
 | Segmento | Lunghezza | Significato |
 | --- | --- | --- |
-| `AA` | 2 | Ultime due cifre dell'anno (es. `26` = 2026). |
+| `AA` | 2 | Ultime due cifre dell'**anno del documento**. |
 | `PPP` | 3 | Progressivo annuale, con zeri iniziali. |
-| `AGE` | 3 | Codice agente (attualmente `GBE`, costante). |
+| `CODICEAGENTE` | 2–3 | Codice agente assegnato (nel codice attuale costante `GBE`). |
 
-Regole:
+### 5.1 Il prefisso segue l'anno
 
-- Il progressivo è calcolato scansionando i DDT esistenti dello stesso anno e prendendo il
-  massimo + 1. Il contatore su IndexedDB viene aggiornato come copia di sicurezza.
-- **Il mittente non compare nella numerazione.** Nel modello obiettivo la stessa numerazione può
-  esistere per mittenti diversi: la distinzione avviene tramite l'archivio di appartenenza.
+**Il prefisso numerico cambia con l'anno del documento e il progressivo riparte da `001` a ogni
+cambio di anno.** Non esiste una numerazione continua tra un anno e il successivo.
+
+| Anno | Prefisso | Primo numero | Esempi |
+| --- | --- | --- | --- |
+| 2026 | `26` | `26001` | `26001GB`, `26014GBE`, `26007MRU` |
+| 2027 | `27` | `27001` | `27001GB`, `27014GBE`, `27007MRU` |
+| 2028 | `28` | `28001` | `28001GB`, `28014GBE`, `28007MRU` |
+
+L'anno usato è quello della **data del documento** (campo `data`), non la data di emissione: un DDT
+datato 2026 compilato a gennaio 2027 riceve comunque un numero `26xxx`. Nel codice questa regola è
+applicata da `getYearCode()`, che ricava il prefisso dal parametro passato a `getNextDDTNumber()`.
+
+Il passaggio di anno non richiede alcun intervento manuale: cambia il prefisso, riparte il
+progressivo e nasce il nuovo archivio annuale (vedi §10.4).
+
+### 5.2 Altre regole
+
+- Il progressivo è calcolato scansionando i DDT esistenti **dello stesso anno** — confrontando i
+  primi due caratteri del numero — e prendendo il massimo + 1. Il contatore su IndexedDB viene
+  aggiornato come copia di sicurezza.
+- Il codice agente ha **lunghezza variabile** (2 o 3 caratteri) ed è un identificativo assegnato,
+  non derivabile meccanicamente dal nome dell'utente: vedi [USERS.md](USERS.md#2-utenti-abilitati).
+  Il parsing del numero deve quindi basarsi sui **primi 5 caratteri** (anno + progressivo) e
+  trattare il resto come codice agente, non su posizioni fisse in coda.
+- **Il mittente non compare nella numerazione.** La stessa numerazione può esistere per mittenti
+  diversi: la distinzione avviene tramite l'archivio di appartenenza (vedi §11).
+- Attenzione a non confondere i due formati dell'anno: **2 cifre nel numero DDT** (`27001GBE`),
+  **4 cifre nel nome dell'archivio** (`MS_GBE_2027.json`).
 
 ---
 
@@ -166,22 +197,140 @@ Snapshot inviato al backend e conservato su Drive:
 
 ---
 
-## 10. Modello obiettivo: archivi separati
+## 10. Modello definitivo: archivi separati
 
-Nel modello multiutente ogni **serie documentale** avrà un archivio JSON indipendente su Drive:
+### 10.1 Serie documentale
+
+Una **serie documentale** identifica il soggetto che emette il DDT. Determina il mittente stampato
+in intestazione e l'archivio su cui il documento viene registrato. Le serie in uso sono `MS` e
+`PM`; l'elenco aggiornato e i mittenti associati sono in [USERS.md](USERS.md#1-serie-documentali).
+
+La serie è un **dato di configurazione**, non una costante di codice: aggiungerne una non deve
+comportare modifiche al modello dati.
+
+### 10.2 Nomenclatura degli archivi
+
+Standard definitivo:
 
 ```
-MS_GBE_2026.json
-PM_GBE_2026.json
-MS_MRU_2026.json
+<SERIE>_<CODICEAGENTE>_<ANNO>.json
 ```
 
-Convenzione del nome: `<SERIE>_<AGENTE>_<ANNO>.json`.
+| Segmento | Contenuto |
+| --- | --- |
+| `SERIE` | Sigla della serie documentale (`MS`, `PM`). |
+| `CODICEAGENTE` | Codice agente assegnato all'utente (2–3 caratteri). |
+| `ANNO` | Anno a 4 cifre. |
 
-Ogni archivio conterrà:
+Esempi:
 
-- `progressivo` — ultimo numero utilizzato nella serie;
-- `documenti` — elenco dei DDT;
-- `metadata` — informazioni di servizio (versione schema, ultimo aggiornamento, mittente).
+```
+MS_GBE_2027.json
+MS_MRU_2027.json
+PM_MRU_2027.json
+PM_SS_2027.json
+```
+
+Il nome va interpretato **per posizione**, separando sui due underscore. Non va cercato per
+sottostringa: il codice agente può coincidere con una sigla di serie (`MS_MS_2027.json` è un nome
+valido, vedi [USERS.md](USERS.md#2-utenti-abilitati)).
+
+### 10.3 Struttura di un archivio
+
+```json
+{
+  "metadata": {
+      "serie": "MS",
+      "mittente": "Zimmer Biomet Italia",
+      "agente": "Giovanni Bennardo",
+      "codiceAgente": "GBE",
+      "anno": 2027,
+      "versione": 1
+  },
+  "progressivo": 125,
+  "documenti": []
+}
+```
+
+| Campo | Tipo | Significato |
+| --- | --- | --- |
+| `metadata.serie` | `string` | Sigla della serie documentale. |
+| `metadata.mittente` | `string` | Ragione sociale del soggetto emittente. |
+| `metadata.agente` | `string` | Nome esteso dell'utente, per leggibilità e per la dashboard. |
+| `metadata.codiceAgente` | `string` | Codice agente, usato nella numerazione e nel nome archivio. |
+| `metadata.anno` | `number` | Anno di competenza dell'archivio. |
+| `metadata.versione` | `number` | Versione dello schema dell'archivio, per future migrazioni. |
+| `progressivo` | `number` | Ultimo progressivo utilizzato nell'archivio. |
+| `documenti` | `DDT[]` | Elenco dei documenti, nel formato descritto in §2. |
+
+I campi di `metadata` sono **ridondanti rispetto al nome del file**: il nome resta l'identificatore
+operativo, `metadata` rende l'archivio autodescrittivo anche se estratto dal suo contesto. In caso
+di discordanza fa fede il contenuto di `metadata`.
+
+### 10.4 Gestione del progressivo
+
+- Il progressivo è **locale all'archivio**: ogni combinazione serie + agente + anno ha la propria
+  sequenza, indipendente da tutte le altre.
+- Il nuovo numero è `progressivo + 1`; il campo viene aggiornato contestualmente all'inserimento
+  del documento.
+- Al cambio di anno nasce un nuovo archivio e il progressivo riparte da zero.
+- Il valore resta comunque ricalcolabile scansionando `documenti`: `progressivo` è un indice di
+  servizio, non l'unica fonte di verità. Questo mantiene la logica di recupero già presente
+  nell'applicazione attuale (vedi §5).
+
+### 10.5 Vantaggi degli archivi separati
+
+- **Isolamento**: il dispositivo di un agente lavora solo sui propri archivi; un errore o una
+  corruzione resta circoscritta.
+- **Dimensione contenuta**: la crescita di un archivio dipende dai documenti di un solo agente in
+  un solo anno, non dal volume aziendale complessivo.
+- **Concorrenza ridotta**: agenti diversi scrivono su file diversi, eliminando gran parte dei
+  conflitti di scrittura simultanea.
+- **Numerazione semplice**: i progressivi non devono essere coordinati tra utenti.
+- **Riservatezza**: la separazione limita per costruzione l'esposizione dei dati sanitari indiretti.
+- **Storicizzazione naturale**: gli archivi degli anni chiusi diventano immutabili.
+
+### 10.6 Estendibilità
+
+Aggiungere un archivio è un'operazione di configurazione: nasce alla prima emissione di un
+documento per una combinazione serie + agente + anno non ancora presente. Nuovi agenti, nuove
+serie e nuovi anni non richiedono modifiche al modello dati, al frontend o al backend.
+
+### 10.7 Compatibilità con l'archivio attuale
+
+L'archivio unico odierno (`{ version, updatedAt, ddt, counters }`, §8) corrisponde a un singolo
+archivio della serie `MS` per l'agente `GBE`. La migrazione consiste nel riversarne i documenti in
+`MS_GBE_<ANNO>.json` valorizzando `metadata` e `progressivo`, senza alcuna modifica alla struttura
+del singolo DDT.
+
+---
+
+## 11. Identità del documento
+
+**Il numero DDT non identifica univocamente il documento.** Lo stesso numero può esistere
+legittimamente in archivi diversi: è una conseguenza voluta del fatto che il mittente non compare
+nella numerazione.
+
+L'identità completa di un documento è:
+
+```
+serie documentale + codice agente + anno + numero DDT
+```
+
+ovvero, in forma equivalente e più compatta:
+
+```
+nome archivio + numero DDT
+```
+
+Esempio: `27001MRU` non è sufficiente; `MS_MRU_2027.json` + `27001MRU` lo è.
+
+Conseguenze operative:
+
+- ogni ricerca, esportazione o ristampa deve trasportare l'archivio di provenienza insieme al
+  numero;
+- la dashboard amministrativa non può indicizzare i documenti sul solo numero;
+- il campo `id` (UUID) resta l'unica chiave tecnica globalmente univoca e va preservato in
+  qualunque migrazione.
 
 Vedi [ARCHITECTURE.md](ARCHITECTURE.md) e [USERS.md](USERS.md).

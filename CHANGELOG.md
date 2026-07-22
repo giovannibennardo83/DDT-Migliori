@@ -12,12 +12,31 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
 ### Aggiunto
 - Struttura documentale del progetto: `README.md`, `CLAUDE.md`, `ROADMAP.md`, `CHANGELOG.md`
   e cartella `docs/` con architettura, modello dati, API e utenti.
-
-### Modificato
-- _nulla_
+- Stampa multipagina: i DDT con più di 12 righe proseguono su più pagine, ciascuna copia
+  integrale del modulo, con indicatore "Pagina X di Y" presente solo sui documenti multipagina.
 
 ### Corretto
-- _nulla_
+- La stampa non tronca più i DDT con più di 12 righe. `print.html` applicava `slice(0, 12)`
+  all'elenco righe: le eccedenti non comparivano sul documento stampato, senza alcuna
+  segnalazione all'utente. I dati salvati non erano interessati.
+
+### Modificato
+- Revisione e consolidamento della documentazione sulla configurazione aziendale reale:
+  - `ROADMAP.md`: milestone completate segnate come tali e sequenza estesa a M12, con
+    l'introduzione dello Storage Service;
+  - `CLAUDE.md`: nuova sezione "Decisioni architetturali consolidate";
+  - `docs/USERS.md`: serie documentali `MS` e `PM`, elenco delle utenze abilitate e modello
+    di crescita indipendente dal numero di utenti;
+  - `docs/DATA_MODEL.md`: modello definitivo degli archivi, standard
+    `<SERIE>_<CODICEAGENTE>_<ANNO>.json` e definizione dell'identità del documento;
+  - `docs/ARCHITECTURE.md`: catena dei livelli, ruolo dello Storage Service e criteri di
+    scalabilità;
+  - `docs/API.md`: contratto del backend multiarchivio e regole di compatibilità.
+- Regola sulle righe precisata in `README.md`, `CLAUDE.md`, `docs/ARCHITECTURE.md` e
+  `docs/DATA_MODEL.md`: 12 righe per pagina, con proseguimento su più pagine per i documenti più
+  lunghi e nessun limite in salvataggio.
+- Versione della cache del Service Worker incrementata a `ddt-cache-v5`, essendo cambiati
+  `print.html` e `print.css`.
 
 ### Rimosso
 - File `# DDT Migliori - Roadmap di svilupp.md` in root, i cui contenuti sono confluiti in
@@ -40,7 +59,7 @@ pull request del repository; di seguito i temi principali già rilasciati.
 - Numerazione automatica progressiva annuale dei DDT.
 - Normalizzazione dello schema righe e migrazione automatica dei campi legacy
   (`articolo` / `descrizione` → `codice_articolo`).
-- Layout di stampa tabellare a 15 righe fisse.
+- Layout di stampa tabellare tarato sul modulo a 12 righe.
 - Supporto PWA: manifest, Service Worker e funzionamento offline.
 
 ---

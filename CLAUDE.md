@@ -31,6 +31,52 @@ Da rispettare in ogni intervento:
 
 ---
 
+## Decisioni architetturali consolidate
+
+Scelte già prese e non più in discussione. Valgono come regole permanenti del progetto: non vanno
+rimesse in dubbio a ogni intervento, e una proposta che le contraddice va segnalata come tale.
+
+### Documento e formati
+
+- **Il JSON è il documento ufficiale.** È la fonte di verità del DDT; tutto il resto ne è una
+  rappresentazione.
+- **I PDF non vengono archiviati.**
+- **I PDF vengono sempre generati dinamicamente** a partire dal JSON, al momento della stampa o
+  della ristampa.
+- **La firma del destinatario viene salvata in Base64** all'interno del documento JSON, come data
+  URL PNG, non come file esterno.
+- **Il numero di righe di un DDT non ha limite superiore.** La regola vale identica in
+  **salvataggio** e in **stampa**: il modulo prevede 12 righe per pagina, ma un documento più lungo
+  va salvato e stampato per intero, proseguendo su più pagine. Il 12 è la capienza di una pagina,
+  non del documento. Nessun componente può troncare, scartare o ignorare righe.
+
+### Archivi e identità del documento
+
+- **Ogni serie documentale possiede un archivio JSON indipendente**, nominato secondo lo standard
+  `<SERIE>_<CODICEAGENTE>_<ANNO>.json`.
+- **Numerazioni uguali appartenenti a mittenti diversi sono corrette** e non costituiscono un
+  errore da correggere.
+- **L'univocità è garantita dall'archivio JSON e non dal numero DDT.** L'identità completa di un
+  documento è `archivio + numero DDT`.
+- **Il mittente non compare nella numerazione**: deriva dalla serie documentale.
+
+### Frontend e processo
+
+- **Il frontend rimane HTML + CSS + JavaScript vanilla**, senza framework, bundler o build step.
+- **Evitare qualsiasi riscrittura completa dell'applicazione.**
+- **Privilegiare sempre piccoli refactoring incrementali**, verificabili uno alla volta.
+- **L'applicazione deve restare utilizzabile offline**: la connettività è un'ottimizzazione, non
+  un prerequisito operativo.
+
+### Scala e ruoli
+
+- **Il progetto è dimensionato su una ventina di agenti ma deve poter crescere senza modifiche
+  architetturali.** Aggiungere un utente, una serie o un anno è configurazione, non sviluppo.
+- **La dashboard amministrativa consulta gli archivi senza modificarli**: è un consumatore in sola
+  lettura.
+
+---
+
 ## Vincoli tecnici
 
 - Nessun processo di build: i file sorgente sono serviti così come sono.
@@ -42,8 +88,17 @@ Da rispettare in ogni intervento:
 - Il Service Worker (`sw.js`) usa una cache con nome versionato (`ddt-cache-vN`).
   Se cambiano gli asset in cache, **incrementare la versione**, altrimenti gli utenti resteranno
   su file vecchi.
-- La stampa è tarata su un modulo a **15 righe fisse**: modifiche a `print.html` / `print.css`
-  vanno verificate visivamente sulla stampa reale.
+- La stampa è tarata su un modulo da **12 righe per pagina** (`ROWS_PER_PAGE` in `print.html`).
+  Fino a 12 righe si stampa una pagina sola, completata con righe vuote; oltre le 12 il documento
+  prosegue su più pagine, **ciascuna copia integrale del modulo** (intestazione, mittente, cliente,
+  causale, dati paziente e firme ripetuti), con l'ultima pagina completata a 12 righe.
+  Il riquadro "Pagina X di Y" compare **solo** sui documenti multipagina, così la stampa a pagina
+  singola resta identica al modulo storico.
+  Il salvataggio non impone alcun limite (`extractAndValidateRighe()` in `app.js`,
+  `normalizeDDTStorage()` in `db.js`): non introdurne.
+  Modifiche a `print.html` / `print.css` vanno verificate visivamente sulla stampa reale, sia sul
+  caso a pagina singola (≤ 12 righe) sia sul caso multipagina (> 12), controllando che non compaia
+  una pagina bianca finale.
 
 ---
 

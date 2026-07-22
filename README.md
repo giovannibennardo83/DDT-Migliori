@@ -12,10 +12,12 @@ etichette prodotto e documenti di scarico sala operatoria per precompilare il DD
 ## Caratteristiche principali
 
 - Compilazione DDT con testata (numero, data, cliente, causale, dati paziente) e righe ripetibili.
-- Numerazione automatica progressiva annuale (formato `26001GBE`).
+- Numerazione automatica progressiva annuale: prefisso di due cifre dell'anno + progressivo +
+  codice agente (`26001GBE` nel 2026, `27001GBE` nel 2027), con progressivo che riparte ogni anno.
 - OCR etichetta singola (REF / LOT / descrizione) e OCR documento di scarico completo.
 - Firma del destinatario tracciata a schermo (canvas) e firma mittente come immagine PNG.
-- Stampa in layout tabellare a 15 righe fisse, ottimizzato per modulo prestampato.
+- Stampa in layout tabellare con **12 righe per pagina**; i documenti più lunghi proseguono su
+  più pagine, ognuna copia completa del modulo.
 - Funzionamento offline tramite Service Worker + installabilità come PWA.
 - Backup e sincronizzazione con merge dei documenti locali e remoti.
 
@@ -68,16 +70,17 @@ Apri poi `http://localhost:8000/index.html` in un browser moderno.
 | [ROADMAP.md](ROADMAP.md) | Visione, milestone e piano di evoluzione multiutente. |
 | [CHANGELOG.md](CHANGELOG.md) | Storico delle modifiche rilasciate. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architettura attuale e architettura obiettivo. |
-| [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Schema dati DDT, righe, contatori e regole di normalizzazione. |
-| [docs/API.md](docs/API.md) | Contratti degli endpoint OCR e backup/sync. |
-| [docs/USERS.md](docs/USERS.md) | Utenti, ruoli, mittenti e modello di accesso previsto. |
+| [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Schema dati DDT, normalizzazione, archivi e identità del documento. |
+| [docs/API.md](docs/API.md) | Contratti degli endpoint OCR e backup/sync, backend multiarchivio. |
+| [docs/USERS.md](docs/USERS.md) | Serie documentali, utenti abilitati, ruoli e modello di crescita. |
 
 ---
 
 ## Stato del progetto
 
 Applicazione **in produzione** per uso singolo agente, in evoluzione verso una piattaforma
-multiutente (circa 20 agenti + ufficio amministrativo). Vedi [ROADMAP.md](ROADMAP.md).
+multiutente (una ventina di agenti + ufficio amministrativo). Vedi [ROADMAP.md](ROADMAP.md)
+per le milestone e [docs/USERS.md](docs/USERS.md) per la configurazione aziendale.
 
 ---
 

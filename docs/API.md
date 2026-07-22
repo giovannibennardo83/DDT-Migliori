@@ -16,7 +16,8 @@ oltre alla funzione OCR e alla Web App Google Apps Script.
 | Sync | `GET` Apps Script Web App | Lettura dello snapshot remoto. |
 
 Gli URL di produzione sono definiti come costanti in `app.js` (`OCR_URL`, `BACKUP_URL`).
-La milestone M01 della [roadmap](../ROADMAP.md) prevede il loro spostamento in un `config.js`.
+La loro estrazione in un `config.js` separato è prevista insieme allo Storage Service (M05 della
+[roadmap](../ROADMAP.md)).
 
 ---
 
@@ -168,13 +169,59 @@ La richiesta è inviata senza `Content-Type` esplicito per evitare il preflight 
 - L'endpoint OCR è aperto a qualsiasi origine e non applica rate limiting.
 - I dati transitati includono dati sanitari indiretti (iniziali paziente, cartella clinica).
 
-L'introduzione di autenticazione e autorizzazione è prevista nelle milestone M05–M07 della
+L'introduzione di autenticazione e autorizzazione è prevista dalla milestone M08 della
 [roadmap](../ROADMAP.md).
 
 ---
 
-## 4. Evoluzione prevista
+## 4. Evoluzione: backend multiarchivio
 
-Con il passaggio agli archivi separati, gli endpoint di backup e sync dovranno accettare un
-identificativo di archivio (serie + agente + anno) e instradare lettura e scrittura sul file
-corrispondente, mantenendo per compatibilità il comportamento attuale come default.
+Con il passaggio agli archivi separati (M06–M07 della [roadmap](../ROADMAP.md)) il backend smette
+di gestire un unico snapshot e opera su **un archivio per volta**.
+
+### 4.1 Identificazione dell'archivio
+
+Ogni richiesta lavora su uno specifico archivio, identificato da tre coordinate:
+
+| Parametro | Esempio | Significato |
+| --- | --- | --- |
+| `serie` | `MS` | Serie documentale, determina il mittente. |
+| `agente` | `GBE` | Codice agente assegnato all'utente. |
+| `anno` | `2027` | Anno di competenza. |
+
+Il backend risolve le tre coordinate nel nome file secondo lo standard
+`<SERIE>_<CODICEAGENTE>_<ANNO>.json` (vedi
+[DATA_MODEL.md](DATA_MODEL.md#102-nomenclatura-degli-archivi)). Le coordinate viaggiano come
+parametri espliciti e **non** vengono ricavate dal numero del documento: il numero DDT non
+identifica univocamente un documento (vedi
+[DATA_MODEL.md](DATA_MODEL.md#11-identità-del-documento)).
+
+### 4.2 Operazioni
+
+| Operazione | Metodo | Effetto |
+| --- | --- | --- |
+| Lettura archivio | `GET` + coordinate | Restituisce `metadata`, `progressivo` e `documenti`. |
+| Scrittura archivio | `POST` + coordinate | Aggiorna l'archivio indicato, lasciando invariati tutti gli altri. |
+
+Regole:
+
+- Una richiesta che non specifica le coordinate ricade sul **comportamento attuale**, così che i
+  client non aggiornati continuino a funzionare.
+- Una richiesta di scrittura tocca **un solo archivio**: non esiste un'operazione che aggiorni più
+  archivi contemporaneamente.
+- Un archivio inesistente viene creato alla prima scrittura, con `progressivo` inizializzato a
+  zero e `metadata` valorizzato dalle coordinate.
+- La safety check su `updatedAt` descritta in §2 resta valida, ma va applicata **per archivio** e
+  non globalmente.
+- La dashboard amministrativa usa esclusivamente operazioni di lettura.
+
+### 4.3 Compatibilità
+
+La compatibilità con gli endpoint attuali è un requisito, non un'opzione: l'archivio unico odierno
+corrisponde alla combinazione `MS` + `GBE` + anno corrente, e resta raggiungibile senza coordinate
+finché tutti i client non saranno migrati. Il frontend non conosce comunque questi dettagli, perché
+li incapsula lo Storage Service (vedi
+[ARCHITECTURE.md](ARCHITECTURE.md#42-storage-service)).
+
+L'endpoint OCR **non è interessato** da questa evoluzione: è privo di stato e indipendente
+dall'archivio di destinazione.
