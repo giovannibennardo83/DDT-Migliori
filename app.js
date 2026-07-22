@@ -25,7 +25,7 @@ const ocrPreview = document.getElementById('ocr-preview');
 let activeOcrRow = null;
 
 
-const BACKUP_URL = 'https://script.google.com/macros/s/AKfycbzbF4v2-01P9AvsUWPhJFrdow5mPljOCiZYpZr_KrPIcB1qZmtzP53mTiFvI_ucw8g/exec';
+const BACKUP_URL = 'https://script.google.com/macros/s/AKfycbzg8dEPdItQhJTgClYWts1xhZcw7RMkf896XeCfAjYtMhlO6WI_Pi5mFaKF2FpMwPWBsg/exec';
 const OCR_URL = 'https://ddt-chi.vercel.app/api/ocr';
 const numeroInput = document.getElementById('numero');
 const dataInput = document.getElementById('data');

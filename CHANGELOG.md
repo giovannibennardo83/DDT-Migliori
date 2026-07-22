@@ -37,6 +37,11 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
   lunghi e nessun limite in salvataggio.
 - Versione della cache del Service Worker incrementata a `ddt-cache-v5`, essendo cambiati
   `print.html` e `print.css`.
+- Migrazione del backend su un nuovo Google Drive dedicato (M03): `BACKUP_URL` in `app.js`
+  punta al nuovo deployment Apps Script, che legge e scrive
+  `DDT-Migliori/Archivi/MS_GBE_2026.json`. Contratto API e comportamento invariati; storico
+  (59 DDT) migrato e verificato. Cache del Service Worker incrementata a `ddt-cache-v6`.
+  Il vecchio backend resta attivo come rollback.
 
 ### Rimosso
 - File `# DDT Migliori - Roadmap di svilupp.md` in root, i cui contenuti sono confluiti in
