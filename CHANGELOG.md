@@ -16,6 +16,9 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
   integrale del modulo, con indicatore "Pagina X di Y" presente solo sui documenti multipagina.
 
 ### Corretto
+- Il backup non può più sovrascrivere un archivio remoto popolato con una lista locale vuota:
+  è lo scenario di un dispositivo appena ripulito che salva prima di aver sincronizzato, che
+  il 22/07/2026 ha causato lo svuotamento (poi ripristinato) dell'archivio su Drive.
 - La stampa non tronca più i DDT con più di 12 righe. `print.html` applicava `slice(0, 12)`
   all'elenco righe: le eccedenti non comparivano sul documento stampato, senza alcuna
   segnalazione all'utente. I dati salvati non erano interessati.

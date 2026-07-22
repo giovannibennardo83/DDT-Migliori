@@ -439,6 +439,20 @@ async function backupToDrive(options = {}) {
     console.log('BACKUP PAYLOAD SIZE', JSON.stringify(data).length);
     console.log('BACKUP FIRST DDT', data.ddt[0]);
 
+    // Mai sovrascrivere un archivio popolato con una lista vuota: e' il caso
+    // di un dispositivo appena ripulito che salva prima di aver sincronizzato.
+    // Se il controllo remoto fallisce, il backup viene comunque annullato:
+    // senza rete il POST non andrebbe a buon fine in ogni caso.
+    if (ddt.length === 0) {
+      const remoteRes = await fetch(BACKUP_URL + '?t=' + Date.now());
+      const remote = await remoteRes.json();
+
+      if (Array.isArray(remote?.ddt) && remote.ddt.length > 0) {
+        console.log('Backup bloccato: lista locale vuota, archivio remoto popolato');
+        return;
+      }
+    }
+
     if (!skipRemoteSafetyCheck) {
       const remoteRes = await fetch(BACKUP_URL + '?t=' + Date.now());
       const remote = await remoteRes.json();
