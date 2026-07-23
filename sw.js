@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ddt-cache-v9';
+const CACHE_NAME = 'ddt-cache-v10';
 const ASSETS = [
   './',
   './index.html',

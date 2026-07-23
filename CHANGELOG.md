@@ -12,6 +12,13 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
 ### Aggiunto
 - Struttura documentale del progetto: `README.md`, `CLAUDE.md`, `ROADMAP.md`, `CHANGELOG.md`
   e cartella `docs/` con architettura, modello dati, API e utenti.
+- Backend v3: un file JSON per DDT su Drive (`Archivio/<Nome Agente>/<Serie>/<Anno>/<Numero>.json`)
+  al posto dell'archivio unico per serie/anno. Sincronizzazione **incrementale** (parametro
+  `dopo`: viaggiano solo i documenti modificati, con l'elenco dei numeri per rilevare le
+  eliminazioni); i file eliminati finiscono nel cestino di Drive. Dati locali separati per
+  agente (`ddtRecords_<CODICE>`, coda e marcatori di sync per codice): sulle postazioni
+  condivise il cambio utente non azzera più nulla. Migrazione dei 60 DDT esistenti nella
+  nuova struttura, per anno del documento.
 - Piattaforma multiutente: login con codice agente e PIN (cambio obbligatorio del PIN
   iniziale, cambio volontario dalla barra utente, logout), Storage Service (`storage.js`)
   come unico punto di contatto col backend, scritture per singolo documento (upsert/delete)

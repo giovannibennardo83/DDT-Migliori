@@ -71,8 +71,16 @@ function normalizeDDTStorage(ddt) {
   return normalized;
 }
 
+// I documenti locali sono separati per agente: sulla stessa postazione ogni
+// utente vede e tocca solo i propri. La migrazione delle chiavi pre-esistenti
+// e' gestita da storage.js.
+function ddtStorageKey() {
+  const utente = typeof STORAGE !== 'undefined' ? STORAGE.utente() : null;
+  return utente ? `${DDT_STORAGE_KEY}_${utente.codice}` : DDT_STORAGE_KEY;
+}
+
 function getDDTs() {
-  const raw = localStorage.getItem(DDT_STORAGE_KEY);
+  const raw = localStorage.getItem(ddtStorageKey());
   if (!raw) return [];
 
   try {
@@ -85,7 +93,7 @@ function getDDTs() {
 
 function saveDDTs(ddts) {
   const normalized = Array.isArray(ddts) ? ddts.map(normalizeDDTStorage) : [];
-  localStorage.setItem(DDT_STORAGE_KEY, JSON.stringify(normalized));
+  localStorage.setItem(ddtStorageKey(), JSON.stringify(normalized));
 }
 
 async function saveAllDDT(ddts) {

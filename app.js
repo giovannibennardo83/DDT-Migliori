@@ -413,54 +413,6 @@ function saveAndPrint(ddt) {
   }
 }
 
-function mergeDDTLists(localDDT = [], remoteDDT = []) {
-  const mergedById = new Map();
-
-  const consider = (item) => {
-    if (!item) return;
-    const key = item.id || item.numero;
-    if (!key) return;
-
-    const existing = mergedById.get(key);
-    if (!existing) {
-      mergedById.set(key, item);
-      return;
-    }
-
-    const itemUpdatedAt = new Date(item.updatedAt || 0).getTime() || 0;
-    const existingUpdatedAt = new Date(existing.updatedAt || 0).getTime() || 0;
-
-    const mergedItem = itemUpdatedAt >= existingUpdatedAt
-      ? {
-        ...existing,
-        ...item,
-        firma_destinatario:
-          item.firma_destinatario ||
-          existing?.firma_destinatario ||
-          null,
-      }
-      : {
-        ...item,
-        ...existing,
-        firma_destinatario:
-          existing?.firma_destinatario ||
-          item.firma_destinatario ||
-          null,
-      };
-
-    mergedById.set(key, mergedItem);
-  };
-
-  localDDT.forEach(consider);
-  remoteDDT.forEach(consider);
-
-  return [...mergedById.values()].sort((a, b) => {
-    const numA = parseInt((a.numero || '').replace(/\D/g, ''), 10) || 0;
-    const numB = parseInt((b.numero || '').replace(/\D/g, ''), 10) || 0;
-    return numB - numA;
-  });
-}
-
 async function syncDDT() {
   if (!navigator.onLine) return;
   if (!STORAGE.sessioneAttiva()) return;
@@ -471,21 +423,11 @@ async function syncDDT() {
     console.log('SYNC START');
 
     // Prima le operazioni rimaste in coda (salvataggi/eliminazioni offline),
-    // poi la lettura degli archivi remoti dell'utente.
+    // poi la riconciliazione incrementale con gli archivi remoti.
     await STORAGE.flushQueue();
 
-    const localDDT = await getAllDDT();
-    const remoteDDT = await STORAGE.leggiRemoti();
-    console.log('REMOTE DDT:', remoteDDT.length, '| LOCAL DDT:', localDDT.length);
-
-    // A coda vuota il server e' autorevole: cio' che non esiste piu' sul
-    // backend (eliminato da un altro dispositivo) sparisce anche in locale.
-    // Con operazioni ancora in coda, o con un remoto sospettosamente vuoto,
-    // si torna al merge conservativo.
-    const serverAutorevole = STORAGE.codaVuota()
-      && !(remoteDDT.length === 0 && localDDT.length > 0);
-
-    const finalDDT = serverAutorevole ? remoteDDT : mergeDDTLists(localDDT, remoteDDT);
+    const finalDDT = await STORAGE.sincronizza(await getAllDDT());
+    console.log('SYNC: documenti dopo riconciliazione:', finalDDT.length);
 
     await saveAllDDT(finalDDT);
     await updateCountersFromDDT(finalDDT);
@@ -1064,15 +1006,11 @@ async function eseguiLogin() {
       return;
     }
 
-    // Cambio utente sul dispositivo: i dati locali dell'utente precedente
-    // non devono restare visibili al nuovo.
-    const precedente = localStorage.getItem(LAST_USER_KEY);
-    if (precedente && precedente !== codice) {
-      saveDDTs([]);
-      localStorage.removeItem('ddtOpsPending');
-      resetFormState();
-    }
+    // I dati locali sono separati per agente (chiavi per codice): il cambio
+    // utente non richiede alcun azzeramento. Si ricorda solo l'ultimo codice
+    // per precompilare il login.
     localStorage.setItem(LAST_USER_KEY, codice);
+    resetFormState();
 
     if (pin === `${codice}1234`) {
       pinDaCambiare = pin;

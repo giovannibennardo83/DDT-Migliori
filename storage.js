@@ -4,7 +4,6 @@
 
 const STORAGE = (function () {
   const SESSION_KEY = 'ddtSession';
-  const QUEUE_KEY = 'ddtOpsPending';
 
   let session = leggiJson(SESSION_KEY);
 
@@ -15,6 +14,28 @@ const STORAGE = (function () {
       return null;
     }
   }
+
+  // I dati locali sono separati per agente: ogni codice ha le proprie chiavi.
+  // Sulle postazioni condivise il cambio utente non cancella nulla.
+  function chiavePerAgente(base) {
+    const codice = session && session.utente ? session.utente.codice : null;
+    return codice ? `${base}_${codice}` : base;
+  }
+
+  // Migrazione una tantum delle chiavi globali pre-esistenti verso quelle
+  // per agente, attribuendole all'ultimo utente del dispositivo.
+  (function migraChiaviLocali() {
+    const proprietario = localStorage.getItem('ddtLastUser');
+    if (!proprietario) return;
+
+    ['ddtRecords', 'ddtOpsPending'].forEach((base) => {
+      const vecchio = localStorage.getItem(base);
+      if (vecchio !== null && localStorage.getItem(`${base}_${proprietario}`) === null) {
+        localStorage.setItem(`${base}_${proprietario}`, vecchio);
+      }
+      if (vecchio !== null) localStorage.removeItem(base);
+    });
+  })();
 
   async function chiama(payload) {
     const res = await fetch(APP_CONFIG.backendUrl, {
@@ -36,15 +57,22 @@ const STORAGE = (function () {
     return anno >= 2020 && anno <= 2100 ? anno : new Date().getFullYear();
   }
 
+  // Nome file del documento sul backend: numero ripulito, id in mancanza.
+  // Deve replicare nomeFileDoc() dell'Apps Script.
+  function nomeFileDoc(ddt) {
+    const numero = String(ddt?.numero || '').replace(/[^A-Za-z0-9_-]/g, '');
+    return numero || String(ddt?.id || '');
+  }
+
   // --- coda offline -------------------------------------------------------
 
   function coda() {
-    const ops = leggiJson(QUEUE_KEY);
+    const ops = leggiJson(chiavePerAgente('ddtOpsPending'));
     return Array.isArray(ops) ? ops : [];
   }
 
   function salvaCoda(ops) {
-    localStorage.setItem(QUEUE_KEY, JSON.stringify(ops));
+    localStorage.setItem(chiavePerAgente('ddtOpsPending'), JSON.stringify(ops));
   }
 
   function accoda(op) {
@@ -61,7 +89,7 @@ const STORAGE = (function () {
   async function inviaOp(op) {
     const payload = { azione: op.azione, token: session.token, serie: op.serie, anno: op.anno };
     if (op.azione === 'upsert') payload.ddt = op.ddt;
-    if (op.azione === 'delete') payload.id = op.id;
+    if (op.azione === 'delete') { payload.numero = op.numero; payload.id = op.id; }
     return chiama(payload);
   }
 
@@ -147,7 +175,13 @@ const STORAGE = (function () {
     },
 
     async remove(ddt) {
-      const op = { azione: 'delete', serie: ddt.serie || 'MS', anno: annoDi(ddt), id: ddt.id };
+      const op = {
+        azione: 'delete',
+        serie: ddt.serie || 'MS',
+        anno: annoDi(ddt),
+        numero: ddt.numero,
+        id: ddt.id,
+      };
       return this._esegui(op);
     },
 
@@ -185,36 +219,60 @@ const STORAGE = (function () {
 
     flushQueue,
 
-    // Legge gli archivi remoti dell'utente: ogni serie abilitata, anno corrente
-    // e precedente. Restituisce l'elenco unificato con la serie valorizzata.
-    async leggiRemoti() {
-      if (!session) return [];
+    // Sincronizzazione incrementale: per ogni serie abilitata e per anno
+    // corrente e precedente, chiede al backend solo i documenti modificati
+    // dall'ultima sync e riconcilia le eliminazioni tramite l'elenco dei
+    // numeri presenti. Riceve la lista locale e restituisce quella aggiornata.
+    async sincronizza(localDocs) {
+      if (!session) return localDocs;
 
+      const chiaveSync = chiavePerAgente('ddtLastSync');
+      const ultimaSync = leggiJson(chiaveSync) || {};
       const annoCorrente = new Date().getFullYear();
-      const richieste = [];
+      const inCoda = new Set(coda().map((o) => (o.ddt ? o.ddt.id : o.id)));
 
-      session.utente.serie.forEach((serie) => {
-        [annoCorrente, annoCorrente - 1].forEach((anno) => {
-          richieste.push({ serie, anno });
-        });
-      });
+      let docs = localDocs.slice();
 
-      const tutti = [];
-      for (const r of richieste) {
-        const esito = await chiama({ azione: 'leggi', token: session.token, serie: r.serie, anno: r.anno });
+      for (const serie of session.utente.serie) {
+        for (const anno of [annoCorrente, annoCorrente - 1]) {
+          const chiave = `${serie}_${anno}`;
+          const payload = { azione: 'leggi', token: session.token, serie, anno };
+          if (ultimaSync[chiave]) payload.dopo = ultimaSync[chiave];
 
-        if (!esito.ok && esito.errore === 'sessione_non_valida') {
-          sessioneScaduta();
-          throw new Error('sessione scaduta');
+          const esito = await chiama(payload);
+
+          if (!esito.ok && esito.errore === 'sessione_non_valida') {
+            sessioneScaduta();
+            throw new Error('sessione scaduta');
+          }
+          if (!esito.ok) continue;
+
+          // Documenti nuovi o modificati sul server.
+          (esito.documenti || []).forEach((remoto) => {
+            if (!remoto || !remoto.id) return;
+            remoto.serie = serie;
+            const indice = docs.findIndex((d) => d.id === remoto.id);
+            if (indice >= 0) docs[indice] = remoto;
+            else docs.push(remoto);
+          });
+
+          // Eliminazioni: un documento locale di questa serie/anno che non
+          // compare piu' nell'elenco remoto (e non e' in coda di invio) e'
+          // stato cancellato altrove.
+          const presenti = new Set(esito.elenco || []);
+          docs = docs.filter((d) => {
+            if ((d.serie || 'MS') !== serie) return true;
+            if (annoDi(d) !== anno) return true;
+            if (inCoda.has(d.id)) return true;
+            return presenti.has(nomeFileDoc(d));
+          });
+
+          ultimaSync[chiave] = esito.adesso || ultimaSync[chiave];
         }
-        if (!esito.ok) continue;
-
-        (esito.archivio.ddt || []).forEach((d) => {
-          if (d) tutti.push({ ...d, serie: r.serie });
-        });
       }
 
-      return tutti;
+      localStorage.setItem(chiaveSync, JSON.stringify(ultimaSync));
+      return docs;
     },
   };
 })();
