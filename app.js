@@ -672,17 +672,67 @@ async function handleOcrScaricoFileChange(event) {
   }
 }
 
+// --- vista archivio: limite di visualizzazione e ricerca ---------------------
+
+const archivioCerca = document.getElementById('archivio-cerca');
+const archivioStato = document.getElementById('archivio-stato');
+const archivioChips = [...document.querySelectorAll('.archivio-chips .chip')];
+
+let archivioLimite = 5;
+
+function chiaveVistaArchivio() {
+  const utente = STORAGE.utente();
+  return utente ? `ddtVistaArchivio_${utente.codice}` : 'ddtVistaArchivio';
+}
+
+function aggiornaChipsArchivio() {
+  archivioChips.forEach((chip) => {
+    chip.classList.toggle('attivo', chip.dataset.limite === String(archivioLimite));
+  });
+}
+
+function caricaVistaArchivio() {
+  const salvato = localStorage.getItem(chiaveVistaArchivio());
+  archivioLimite = salvato === 'tutti' ? 'tutti' : Number(salvato) || 5;
+  aggiornaChipsArchivio();
+}
+
+function impostaLimiteArchivio(limite) {
+  archivioLimite = limite === 'tutti' ? 'tutti' : Number(limite) || 5;
+  localStorage.setItem(chiaveVistaArchivio(), String(archivioLimite));
+  aggiornaChipsArchivio();
+  render(getDDTs());
+}
+
+archivioChips.forEach((chip) => {
+  chip.addEventListener('click', () => impostaLimiteArchivio(chip.dataset.limite));
+});
+
+if (archivioCerca) {
+  archivioCerca.addEventListener('input', () => render(getDDTs()));
+}
+
 function render(ddts) {
-    ddts = [...ddts].sort((a, b) => {
+  const ordinati = [...ddts].sort((a, b) => {
     const numA = parseInt((a.numero || '').replace(/\D/g, '') || '0');
     const numB = parseInt((b.numero || '').replace(/\D/g, '') || '0');
     return numB - numA;
   });
-  list.innerHTML = '';
-  const visibleDDT = ddts;
 
-  visibleDDT.forEach((ddt) => {
-    const index = ddts.findIndex((currentDDT) => currentDDT.id === ddt.id);
+  // La ricerca lavora sull'intero archivio e ignora il limite attivo.
+  const testo = (archivioCerca?.value || '').trim().toLowerCase();
+  let visibili = ordinati;
+  if (testo) {
+    visibili = ordinati.filter((d) =>
+      String(d.numero || '').toLowerCase().includes(testo) ||
+      String(d.cliente?.riga1 || '').toLowerCase().includes(testo));
+  } else if (archivioLimite !== 'tutti') {
+    visibili = ordinati.slice(0, archivioLimite);
+  }
+
+  list.innerHTML = '';
+
+  visibili.forEach((ddt) => {
     const li = document.createElement('li');
 
     const text = document.createElement('span');
@@ -694,7 +744,12 @@ function render(ddts) {
     const editButton = document.createElement('button');
     editButton.textContent = 'Modifica';
     editButton.className = 'secondary';
-    editButton.addEventListener('click', () => loadInForm(ddt, index));
+    editButton.addEventListener('click', () => {
+      // L'indice va risolto per id al momento del clic: l'ordine della lista
+      // renderizzata (ordinata/filtrata) non coincide con quello salvato.
+      const indice = getDDTs().findIndex((d) => d.id === ddt.id);
+      if (indice >= 0) loadInForm(ddt, indice);
+    });
 
     const printButton = document.createElement('button');
     printButton.textContent = 'Stampa';
@@ -707,16 +762,17 @@ function render(ddts) {
       if (!confirm("Sei sicuro di voler eliminare questo DDT? Questa operazione non è reversibile.")) return;
 
       const updated = getDDTs();
-      if (index < 0 || index >= updated.length) return;
+      const indice = updated.findIndex((d) => d.id === ddt.id);
+      if (indice < 0) return;
 
       // eliminazione reale
-      const rimosso = updated[index];
-      updated.splice(index, 1);
+      const rimosso = updated[indice];
+      updated.splice(indice, 1);
 
       saveDDTs(updated);
       render(updated);
 
-      if (editingIndex === index) {
+      if (editingIndex === indice) {
         resetFormState();
       }
 
@@ -732,6 +788,28 @@ function render(ddts) {
     li.append(text, buttons);
     list.appendChild(li);
   });
+
+  if (archivioStato) {
+    archivioStato.textContent = '';
+
+    if (testo) {
+      archivioStato.textContent = visibili.length === 1
+        ? `1 risultato per "${archivioCerca.value.trim()}"`
+        : `${visibili.length} risultati per "${archivioCerca.value.trim()}"`;
+    } else if (visibili.length < ordinati.length) {
+      archivioStato.append(`Mostrati ${visibili.length} di ${ordinati.length} · `);
+      const mostraTutti = document.createElement('button');
+      mostraTutti.type = 'button';
+      mostraTutti.className = 'link';
+      mostraTutti.textContent = 'Mostra tutti';
+      mostraTutti.addEventListener('click', () => impostaLimiteArchivio('tutti'));
+      archivioStato.append(mostraTutti);
+    } else {
+      archivioStato.textContent = ordinati.length
+        ? `${ordinati.length} ${ordinati.length === 1 ? 'documento' : 'documenti'}`
+        : 'Nessun documento';
+    }
+  }
 }
 
 form.addEventListener('submit', async (event) => {
@@ -952,6 +1030,7 @@ function aggiornaBarraUtente() {
 function avviaApp() {
   mostraSoloBox(null);
   aggiornaBarraUtente();
+  caricaVistaArchivio();
   render(getDDTs());
   syncDDT();
 }

@@ -44,6 +44,12 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
   segnalazione all'utente. I dati salvati non erano interessati.
 
 ### Modificato
+- Archivio più leggibile: di default mostra gli **ultimi 5** DDT, con chip `Ultimi 5 ·
+  Ultimi 30 · Tutti` (scelta ricordata per agente), **ricerca live** su numero e cliente che
+  ignora il limite attivo, e riga di stato "Mostrati X di Y · Mostra tutti".
+- Corretto un difetto latente della lista: Modifica ed Elimina risolvevano il documento per
+  posizione nella lista ordinata anziché per id — con ordinamenti o filtri potevano agire sul
+  documento sbagliato.
 - Documentazione riallineata allo stato multiutente realizzato: README, ROADMAP (M01–M10
   completate, deviazioni annotate), CLAUDE (nuove decisioni consolidate e vincoli tecnici),
   `docs/ARCHITECTURE.md`, `docs/DATA_MODEL.md`, `docs/API.md` (contratto v2 come attuale) e

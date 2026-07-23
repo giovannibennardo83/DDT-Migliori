@@ -422,3 +422,52 @@ body.login-attivo { overflow: hidden; }
 }
 
 .user-bar button:hover { background: #334155; }
+
+/* --- Archivio: toolbar, chip e stato --- */
+
+.archivio-toolbar { display: grid; gap: 0.5rem; margin-bottom: 0.75rem; }
+
+#archivio-cerca {
+  margin-top: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+}
+
+.archivio-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+
+.chip {
+  padding: 0.35rem 0.8rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.chip.attivo {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+  font-weight: 600;
+}
+
+.archivio-stato {
+  margin: 0.75rem 0 0;
+  text-align: center;
+  color: #475569;
+  font-size: 0.85rem;
+}
+
+.archivio-stato .link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}

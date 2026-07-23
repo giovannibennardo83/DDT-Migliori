@@ -177,7 +177,17 @@
 
       <section>
         <h2>Archivio DDT</h2>
+        <div class="archivio-toolbar">
+          <input type="search" id="archivio-cerca" placeholder="Cerca numero o cliente…"
+                 autocomplete="off" spellcheck="false" />
+          <div class="archivio-chips" role="group" aria-label="Quanti documenti mostrare">
+            <button type="button" class="chip" data-limite="5">Ultimi 5</button>
+            <button type="button" class="chip" data-limite="30">Ultimi 30</button>
+            <button type="button" class="chip" data-limite="tutti">Tutti</button>
+          </div>
+        </div>
         <ul id="ddt-list"></ul>
+        <p id="archivio-stato" class="archivio-stato"></p>
       </section>
     </main>
 
