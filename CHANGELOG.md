@@ -37,6 +37,10 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
   segnalazione all'utente. I dati salvati non erano interessati.
 
 ### Modificato
+- Documentazione riallineata allo stato multiutente realizzato: README, ROADMAP (M01–M10
+  completate, deviazioni annotate), CLAUDE (nuove decisioni consolidate e vincoli tecnici),
+  `docs/ARCHITECTURE.md`, `docs/DATA_MODEL.md`, `docs/API.md` (contratto v2 come attuale) e
+  `docs/USERS.md` (configurazione in `utenti.json`, credenziali, procedura di onboarding).
 - Revisione e consolidamento della documentazione sulla configurazione aziendale reale:
   - `ROADMAP.md`: milestone completate segnate come tali e sequenza estesa a M12, con
     l'introduzione dello Storage Service;

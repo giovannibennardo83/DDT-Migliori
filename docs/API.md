@@ -3,7 +3,7 @@
 Contratti dei servizi remoti utilizzati dall'applicazione.
 
 Tutte le chiamate partono dal browser. Non esiste un livello server applicativo proprietario
-oltre alla funzione OCR e alla Web App Google Apps Script.
+oltre alla funzione OCR e alla Web App Google Apps Script (backend v2).
 
 ---
 
@@ -12,12 +12,12 @@ oltre alla funzione OCR e alla Web App Google Apps Script.
 | Servizio | Metodo | Scopo |
 | --- | --- | --- |
 | OCR | `POST /api/ocr` | Estrazione dati da immagine (etichetta o documento). |
-| Backup | `POST` Apps Script Web App | Scrittura dello snapshot su Google Drive. |
-| Sync | `GET` Apps Script Web App | Lettura dello snapshot remoto. |
+| Backend dati | `POST` Apps Script Web App | Login, lettura archivi, operazioni per documento. |
+| Stato backend | `GET` Apps Script Web App | Ping di servizio. |
 
-Gli URL di produzione sono definiti come costanti in `app.js` (`OCR_URL`, `BACKUP_URL`).
-La loro estrazione in un `config.js` separato è prevista insieme allo Storage Service (M05 della
-[roadmap](../ROADMAP.md)).
+Gli URL sono definiti in [`config.js`](../config.js) (`backendUrl`, `ocrUrl`). Lato frontend
+**tutte le chiamate al backend dati passano dallo Storage Service** ([`storage.js`](../storage.js)):
+nessun altro file esegue `fetch` verso Apps Script.
 
 ---
 
@@ -30,7 +30,7 @@ Esempio self-hosted: [`backend/ocr-endpoint.example.js`](../backend/ocr-endpoint
 
 Il servizio inoltra l'immagine a un modello vision di OpenAI e restituisce **solo JSON**.
 CORS è abilitato in modo permissivo (`Access-Control-Allow-Origin: *`); il metodo `OPTIONS` è
-gestito come preflight.
+gestito come preflight. L'endpoint è privo di stato e indipendente dagli archivi.
 
 #### Richiesta
 
@@ -121,107 +121,107 @@ campi vuoti, in modo che il client non debba gestire forme diverse:
 
 ---
 
-## 2. Backup e sincronizzazione (Google Apps Script)
+## 2. Backend dati (Apps Script v2)
 
-La Web App Apps Script espone un unico URL che accetta `GET` e `POST` e conserva su Google Drive
-uno snapshot JSON dell'intero archivio.
+Web App Apps Script con **un solo endpoint**. Il codice vive nell'account Google del progetto,
+non in questo repository.
 
-### `GET <BACKUP_URL>?t=<timestamp>`
+Caratteristiche trasversali:
 
-Restituisce lo snapshot remoto corrente. Il parametro `t` è un cache-buster.
+- Ogni richiesta operativa è un **`POST` con body JSON** e campo `azione`. Il body viaggia
+  **senza header `Content-Type`** (evita il preflight CORS, che Apps Script non gestisce);
+  lato server viene letto da `e.postData.contents`.
+- La risposta è **sempre JSON** con `ok: true` oppure `ok: false` + `errore` (codice macchina).
+- La `GET` senza parametri è un ping: `{ "ok": true, "servizio": "DDT-Migliori Backend v2" }`.
+- Le scritture sono **atomiche e per singolo documento**: sotto lock globale (`LockService`)
+  il backend legge l'archivio, applica l'operazione e lo riscrive, senza stati intermedi
+  osservabili. Non esiste un'operazione che sostituisca un archivio intero, né un client può
+  inviarne uno: il body di `upsert` trasporta **un** documento, quello di `delete` un `id`.
 
-#### Risposta
+### 2.1 Autenticazione e sessioni
 
-```json
-{
-  "version": 1,
-  "updatedAt": "2026-01-15T09:40:00.000Z",
-  "ddt": [],
-  "counters": [{ "anno": "26", "last": 42 }]
-}
-```
+- Login con **codice agente + PIN**. I PIN sono conservati come hash SHA-256 con salt, mai in
+  chiaro; la configurazione utenti è in `utenti.json` sul Drive (vedi
+  [USERS.md](USERS.md#2-utenti-abilitati)).
+- Il login restituisce un **token di sessione** (validità 30 giorni, rinnovata a ogni uso).
+  Le sessioni vivono nelle Script Properties del progetto Apps Script.
+- **Il codice agente non viaggia mai nelle operazioni**: deriva sempre dal token lato server.
+  Un client non può esprimere l'intenzione di operare sull'archivio di un altro agente.
+- Ruoli: `agente` (legge e scrive i propri archivi) e `admin` (legge **qualsiasi** archivio
+  indicando `codiceAgente` — unica eccezione al punto precedente, in sola lettura — ma **non può
+  scrivere**).
+- **Tutte le autorizzazioni sono verificate dal server a ogni richiesta**: serie abilitate,
+  proprietà dell'archivio, ruolo. Il client non applica controlli di sicurezza, solo di
+  esperienza d'uso; nulla di ciò che invia è considerato attendibile.
 
-Il client tratta `ddt` come array vuoto se il campo manca o non è un array.
+### 2.2 Azioni
 
-### `POST <BACKUP_URL>`
+| Azione | Body (oltre ad `azione`) | Risposta `ok: true` |
+| --- | --- | --- |
+| `login` | `codice`, `pin` | `token`, `utente {codice, nome, serie[], ruolo}`, `serieInfo` (mittenti per serie) |
+| `leggi` | `token`, `serie`, `anno` (+ `codiceAgente` se admin) | `archivio {version, updatedAt, ddt[], counters[]}` |
+| `upsert` | `token`, `serie`, `anno`, `ddt {…}` | `documenti` (conteggio dopo l'operazione) |
+| `delete` | `token`, `serie`, `anno`, `id` | `documenti` |
+| `cambiaPin` | `token`, `pinAttuale`, `pinNuovo` | — |
+| `logout` | `token` | — |
 
-Sovrascrive lo snapshot remoto con quello locale.
+Semantica:
 
-#### Richiesta
+- **`leggi`** risolve `serie + codice (dal token) + anno` nel file
+  `<SERIE>_<CODICEAGENTE>_<ANNO>.json`; un archivio inesistente torna vuoto, senza errore.
+- **`upsert`** inserisce il documento se l'`id` non esiste, altrimenti lo sostituisce.
+  L'archivio viene creato alla prima scrittura.
+- **`delete`** rimuove il documento con quell'`id`; se non esiste risponde
+  `documento_non_trovato`.
+- **`cambiaPin`** richiede il PIN attuale: il solo token non basta.
 
-Corpo: lo stesso oggetto descritto sopra (`version`, `updatedAt`, `ddt`, `counters`).
-La richiesta è inviata senza `Content-Type` esplicito per evitare il preflight CORS.
+### 2.3 Codici di errore
 
-#### Comportamento del client
+| Codice | Significato |
+| --- | --- |
+| `credenziali_mancanti` / `credenziali_non_valide` | Login rifiutato. |
+| `pin_non_assegnato` | Utente esistente ma senza PIN: va assegnato dall'amministratore. |
+| `sessione_non_valida` | Token assente, scaduto o revocato: serve un nuovo login. |
+| `serie_non_abilitata` | L'utente non è abilitato alla serie richiesta. |
+| `anno_non_valido` | Anno fuori dall'intervallo 2020–2100. |
+| `admin_sola_lettura` | Tentativo di scrittura con ruolo admin. |
+| `documento_non_valido` / `id_mancante` | Payload dell'operazione incompleto. |
+| `documento_non_trovato` | Delete di un id inesistente. |
+| `azione_sconosciuta` / `interno` | Richiesta malformata o errore server. |
 
-- Prima del `POST`, salvo esplicita disattivazione (`skipRemoteSafetyCheck`), il client esegue un
-  `GET` e **annulla il backup** se `updatedAt` remoto è più recente di quello locale.
-- Il `POST` è fire-and-forget: gli errori sono registrati in console e non bloccano la UI.
-- La sincronizzazione (`syncDDT`) è eseguita solo se `navigator.onLine` è `true` e non è già in
-  corso; le regole di fusione sono descritte in [DATA_MODEL.md](DATA_MODEL.md#9-regole-di-merge).
+### 2.4 Comportamento del client (Storage Service)
+
+- **Coda offline**: se una operazione di scrittura fallisce per rete, viene accodata in
+  `localStorage` (`ddtOpsPending`) e reinviata automaticamente al ritorno della connessione,
+  all'avvio e prima di ogni sincronizzazione. Un'operazione più recente sullo stesso documento
+  sostituisce quella in coda.
+- **Sincronizzazione**: prima lo svuotamento della coda, poi la lettura degli archivi
+  dell'utente (ogni serie abilitata × anno corrente e precedente). A coda vuota il server è
+  autorevole (le eliminazioni fatte da altri dispositivi si propagano); con operazioni in coda,
+  o con un remoto inaspettatamente vuoto a fronte di dati locali, si applica il merge
+  conservativo.
+- **Sessione scaduta**: le operazioni restano in coda, l'app ripresenta il login e riparte da lì.
 
 ---
 
 ## 3. Sicurezza — stato attuale
 
-- Gli endpoint **non sono autenticati**: chiunque conosca l'URL della Web App può leggere e
-  sovrascrivere l'archivio.
-- L'endpoint OCR è aperto a qualsiasi origine e non applica rate limiting.
+- Il deployment Apps Script è pubblico (*Chiunque*): l'autenticazione è **applicativa**,
+  interna allo script. Adeguata al modello di rischio del progetto, non a standard bancari.
+- Tutto il traffico è su HTTPS. Il salt dei PIN è una costante dello script: non va cambiato a
+  PIN assegnati, né pubblicato.
+- I PIN iniziali seguono lo schema `CODICE1234` e il **cambio al primo accesso è obbligatorio**
+  lato app; fino al primo accesso di ciascun agente lo schema resta indovinabile — distribuire
+  i codici a ridosso dell'attivazione.
+- Non c'è rate limiting sull'endpoint: un abuso è mitigabile solo ruotando l'URL del deployment.
 - I dati transitati includono dati sanitari indiretti (iniziali paziente, cartella clinica).
-
-L'introduzione di autenticazione e autorizzazione è prevista dalla milestone M08 della
-[roadmap](../ROADMAP.md).
 
 ---
 
-## 4. Evoluzione: backend multiarchivio
+## 4. Evoluzione prevista
 
-Con il passaggio agli archivi separati (M06–M07 della [roadmap](../ROADMAP.md)) il backend smette
-di gestire un unico snapshot e opera su **un archivio per volta**.
-
-### 4.1 Identificazione dell'archivio
-
-Ogni richiesta lavora su uno specifico archivio, identificato da tre coordinate:
-
-| Parametro | Esempio | Significato |
-| --- | --- | --- |
-| `serie` | `MS` | Serie documentale, determina il mittente. |
-| `agente` | `GBE` | Codice agente assegnato all'utente. |
-| `anno` | `2027` | Anno di competenza. |
-
-Il backend risolve le tre coordinate nel nome file secondo lo standard
-`<SERIE>_<CODICEAGENTE>_<ANNO>.json` (vedi
-[DATA_MODEL.md](DATA_MODEL.md#102-nomenclatura-degli-archivi)). Le coordinate viaggiano come
-parametri espliciti e **non** vengono ricavate dal numero del documento: il numero DDT non
-identifica univocamente un documento (vedi
-[DATA_MODEL.md](DATA_MODEL.md#11-identità-del-documento)).
-
-### 4.2 Operazioni
-
-| Operazione | Metodo | Effetto |
-| --- | --- | --- |
-| Lettura archivio | `GET` + coordinate | Restituisce `metadata`, `progressivo` e `documenti`. |
-| Scrittura archivio | `POST` + coordinate | Aggiorna l'archivio indicato, lasciando invariati tutti gli altri. |
-
-Regole:
-
-- Una richiesta che non specifica le coordinate ricade sul **comportamento attuale**, così che i
-  client non aggiornati continuino a funzionare.
-- Una richiesta di scrittura tocca **un solo archivio**: non esiste un'operazione che aggiorni più
-  archivi contemporaneamente.
-- Un archivio inesistente viene creato alla prima scrittura, con `progressivo` inizializzato a
-  zero e `metadata` valorizzato dalle coordinate.
-- La safety check su `updatedAt` descritta in §2 resta valida, ma va applicata **per archivio** e
-  non globalmente.
-- La dashboard amministrativa usa esclusivamente operazioni di lettura.
-
-### 4.3 Compatibilità
-
-La compatibilità con gli endpoint attuali è un requisito, non un'opzione: l'archivio unico odierno
-corrisponde alla combinazione `MS` + `GBE` + anno corrente, e resta raggiungibile senza coordinate
-finché tutti i client non saranno migrati. Il frontend non conosce comunque questi dettagli, perché
-li incapsula lo Storage Service (vedi
-[ARCHITECTURE.md](ARCHITECTURE.md#42-storage-service)).
-
-L'endpoint OCR **non è interessato** da questa evoluzione: è privo di stato e indipendente
-dall'archivio di destinazione.
+- **Dashboard amministrativa** (M11): userà le azioni esistenti con utenza `ADMIN` (`leggi` con
+  `codiceAgente`); non richiede nuove azioni lato backend, salvo un eventuale indice aggregato
+  se il numero di archivi rendesse costosa l'enumerazione.
+- Possibili irrobustimenti futuri: rotazione periodica del token, revoca centralizzata delle
+  sessioni, audit log delle operazioni.

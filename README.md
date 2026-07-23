@@ -1,25 +1,33 @@
 # DDT Migliori
 
-Applicazione web (PWA) per creare, modificare, archiviare e stampare **Documenti di Trasporto (DDT)**
-in ambito dispositivi medici / protesi ortopediche.
+Applicazione web (PWA) **multiutente** per creare, modificare, archiviare e stampare **Documenti
+di Trasporto (DDT)** in ambito dispositivi medici / protesi ortopediche.
 
-L'app funziona **offline**, salva i dati in locale sul dispositivo e li sincronizza con un backup
-remoto su Google Drive tramite Google Apps Script. È inoltre presente un servizio OCR che legge
-etichette prodotto e documenti di scarico sala operatoria per precompilare il DDT.
+Ogni agente accede con il proprio codice e PIN e lavora sui propri archivi, uno per serie
+documentale e anno, conservati su Google Drive tramite Google Apps Script. L'app funziona
+**offline** (le operazioni si accodano e partono al ritorno della rete) ed è affiancata da un
+servizio OCR che legge etichette prodotto e documenti di scarico sala operatoria per precompilare
+il DDT.
 
 ---
 
 ## Caratteristiche principali
 
+- **Login per agente** (codice + PIN, con cambio obbligatorio del PIN iniziale) e sessione
+  persistente sul dispositivo; selezione della serie documentale per gli utenti abilitati a più
+  mittenti.
 - Compilazione DDT con testata (numero, data, cliente, causale, dati paziente) e righe ripetibili.
-- Numerazione automatica progressiva annuale: prefisso di due cifre dell'anno + progressivo +
-  codice agente (`26001GBE` nel 2026, `27001GBE` nel 2027), con progressivo che riparte ogni anno.
+- Numerazione automatica progressiva **per serie e anno**: prefisso di due cifre dell'anno +
+  progressivo + codice agente (`26001GBE` nel 2026, `27001GBE` nel 2027), con progressivo che
+  riparte ogni anno.
+- Un **archivio JSON indipendente** per ogni serie + agente + anno (`MS_GBE_2026.json`), con
+  scritture per singolo documento: nessun client può sovrascrivere l'archivio di un altro.
 - OCR etichetta singola (REF / LOT / descrizione) e OCR documento di scarico completo.
-- Firma del destinatario tracciata a schermo (canvas) e firma mittente come immagine PNG.
+- Firma del destinatario tracciata a schermo (canvas) e firma mittente come immagine PNG;
+  mittente di stampa derivato dalla serie del documento.
 - Stampa in layout tabellare con **12 righe per pagina**; i documenti più lunghi proseguono su
   più pagine, ognuna copia completa del modulo.
-- Funzionamento offline tramite Service Worker + installabilità come PWA.
-- Backup e sincronizzazione con merge dei documenti locali e remoti.
+- Funzionamento offline tramite Service Worker + coda operazioni + installabilità come PWA.
 
 ---
 
@@ -38,11 +46,13 @@ Apri poi `http://localhost:8000/index.html` in un browser moderno.
 
 ### Flusso d'uso
 
-1. Compila la testata del DDT (o usa **OCR documento** per precompilarla).
-2. Aggiungi le righe articolo (`codice_articolo`, `description`, `lotto`, `quantita`),
+1. **Accedi** con codice agente e PIN (il primo accesso richiede la rete e impone un PIN
+   personale); se sei abilitato a più serie, scegli il mittente attivo.
+2. Compila la testata del DDT (o usa **OCR documento** per precompilarla).
+3. Aggiungi le righe articolo (`codice_articolo`, `description`, `lotto`, `quantita`),
    manualmente oppure con **OCR etichetta**.
-3. Acquisisci la firma del destinatario.
-4. **Salva** il documento, poi riaprilo con **Modifica** o generane il PDF con **Stampa**.
+4. Acquisisci la firma del destinatario.
+5. **Salva** il documento, poi riaprilo con **Modifica** o generane il PDF con **Stampa**.
 
 ---
 
@@ -50,15 +60,20 @@ Apri poi `http://localhost:8000/index.html` in un browser moderno.
 
 | Percorso | Ruolo |
 | --- | --- |
-| `index.html` | Interfaccia di compilazione DDT e archivio documenti. |
-| `app.js` | Logica applicativa: righe, validazioni, OCR, firma, backup, sync. |
+| `index.html` | Interfaccia: login, compilazione DDT e archivio documenti. |
+| `config.js` | Endpoint dell'applicazione (backend dati, OCR). |
+| `storage.js` | Storage Service: sessione, operazioni per documento, coda offline. |
+| `app.js` | Logica applicativa: righe, validazioni, OCR, firma, sync, login UI. |
 | `db.js` | Persistenza locale: `localStorage` per i DDT, IndexedDB per i contatori. |
-| `print.html` / `print.css` | Layout e stili della stampa DDT. |
+| `print.html` / `print.css` | Layout e stili della stampa DDT (multipagina). |
 | `styles.css` | Stili dell'interfaccia, incluso layout mobile a card. |
 | `manifest.json` / `sw.js` | Configurazione PWA e cache offline. |
 | `api/ocr.js` | Endpoint OCR serverless (OpenAI Vision) in produzione. |
 | `backend/ocr-endpoint.example.js` | Esempio di endpoint OCR self-hosted (Express). |
 | `assets/` | Risorse statiche (firma mittente). |
+
+Il backend dati (Apps Script v2) non vive nel repository: è nel Google account del progetto.
+Contratto in [docs/API.md](docs/API.md).
 
 ---
 
@@ -78,9 +93,19 @@ Apri poi `http://localhost:8000/index.html` in un browser moderno.
 
 ## Stato del progetto
 
-Applicazione **in produzione** per uso singolo agente, in evoluzione verso una piattaforma
-multiutente (una ventina di agenti + ufficio amministrativo). Vedi [ROADMAP.md](ROADMAP.md)
-per le milestone e [docs/USERS.md](docs/USERS.md) per la configurazione aziendale.
+Piattaforma **multiutente funzionante in ambiente di test** (una ventina di agenti configurati +
+utenza amministrativa).
+
+| Componente | Stato |
+| --- | --- |
+| Backend v2 (multiarchivio, operazioni atomiche, autenticazione) | ✅ Completato |
+| Frontend Login (PIN, cambio obbligatorio, selezione serie) | ✅ Completato |
+| Offline Queue (coda operazioni con invio automatico) | ✅ Completato |
+| Dashboard Admin (consultazione, ristampa, export) | ⏳ Pianificata (M11) |
+| Deploy Vercel + repository privato | ⏳ Pianificato (M12) |
+
+Vedi [ROADMAP.md](ROADMAP.md) per le milestone e [docs/USERS.md](docs/USERS.md) per la
+configurazione aziendale.
 
 ---
 

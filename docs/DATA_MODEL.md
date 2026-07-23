@@ -6,11 +6,18 @@ Struttura dei dati persistiti dall'applicazione, regole di normalizzazione e mig
 
 ## 1. Dove risiedono i dati
 
-| Archivio | Tecnologia | Chiave | Contenuto |
+| Dato | Tecnologia | Chiave | Contenuto |
 | --- | --- | --- | --- |
-| DDT | `localStorage` | `ddtRecords` | Array JSON di tutti i documenti. |
-| Contatori | IndexedDB `ddt-db` v1, store `counters` | `anno` | Ultimo progressivo per anno. |
-| Backup remoto | Google Drive via Apps Script | — | Snapshot JSON di DDT + contatori. |
+| DDT dell'utente | `localStorage` | `ddtRecords` | Array JSON dei documenti (cache locale degli archivi dell'utente). |
+| Sessione | `localStorage` | `ddtSession` | Token, profilo utente, mittenti per serie, serie attiva. |
+| Coda offline | `localStorage` | `ddtOpsPending` | Operazioni `upsert`/`delete` in attesa di invio. |
+| Ultimo utente | `localStorage` | `ddtLastUser` | Codice agente dell'ultimo login sul dispositivo. |
+| Contatori | IndexedDB `ddt-db` v1, store `counters` | `anno` | Ultimo progressivo per anno (copia di sicurezza). |
+| **Archivi** | Google Drive via Apps Script v2 | nome file | Un file JSON per serie + agente + anno (vedi §10). |
+| Utenti | Google Drive (`DDT-Migliori/utenti.json`) | — | Configurazione di utenti, serie e mittenti (vedi [USERS.md](USERS.md)). |
+
+La **fonte di verità** è l'insieme degli archivi su Drive; il `localStorage` è la copia operativa
+del dispositivo, riallineata dalla sincronizzazione.
 
 ---
 
@@ -20,6 +27,7 @@ Struttura dei dati persistiti dall'applicazione, regole di normalizzazione e mig
 {
   "id": "0f1c9b3e-7a44-4a0d-9f0e-6f6a1c2d3e4f",
   "numero": "26001GBE",
+  "serie": "MS",
   "data": "2026-01-15",
   "cliente": {
     "riga1": "Ospedale Esempio",
@@ -40,7 +48,8 @@ Struttura dei dati persistiti dall'applicazione, regole di normalizzazione e mig
 | --- | --- | --- |
 | `id` | `string` | UUID generato con `crypto.randomUUID()`; fallback `ddt-<timestamp>-<random>`. Chiave primaria per il merge. |
 | `numero` | `string` | Numero documento, formato `<AA><PPP><CODICEAGENTE>` (vedi §5). |
-| `data` | `string` | Data documento in formato ISO `AAAA-MM-GG`. |
+| `serie` | `string` | Serie documentale di appartenenza (default `MS` per i documenti storici). Determina archivio di destinazione e mittente di stampa. |
+| `data` | `string` | Data documento in formato ISO `AAAA-MM-GG`. L'anno della data determina l'archivio annuale. |
 | `cliente` | `object` | Destinatario su tre righe libere (vedi §3). |
 | `causale_trasporto` | `string` | Causale del trasporto. |
 | `iniziali_paziente` | `string` | Iniziali del paziente (dato sanitario indiretto). |
@@ -50,7 +59,8 @@ Struttura dei dati persistiti dall'applicazione, regole di normalizzazione e mig
 | `createdAt` | `string?` | ISO 8601, presente solo se già valorizzato. |
 | `updatedAt` | `string?` | ISO 8601; usato per risolvere i conflitti in sincronizzazione. |
 
-Il **mittente non è persistito**: è una costante applicativa (`MITTENTE_FISSO`) usata in stampa.
+Il **mittente non è persistito nel documento**: deriva dalla serie (`utenti.json` → `serieInfo`)
+e viene allegato al solo payload di stampa (`printDDT`).
 
 ---
 
@@ -108,7 +118,7 @@ Formato: **`<AA><PPP><CODICEAGENTE>`**
 | --- | --- | --- |
 | `AA` | 2 | Ultime due cifre dell'**anno del documento**. |
 | `PPP` | 3 | Progressivo annuale, con zeri iniziali. |
-| `CODICEAGENTE` | 2–3 | Codice agente assegnato (nel codice attuale costante `GBE`). |
+| `CODICEAGENTE` | 2–3 | Codice agente dell'utente autenticato (dalla sessione di login). |
 
 ### 5.1 Il prefisso segue l'anno
 
@@ -130,9 +140,10 @@ progressivo e nasce il nuovo archivio annuale (vedi §10.4).
 
 ### 5.2 Altre regole
 
-- Il progressivo è calcolato scansionando i DDT esistenti **dello stesso anno** — confrontando i
-  primi due caratteri del numero — e prendendo il massimo + 1. Il contatore su IndexedDB viene
-  aggiornato come copia di sicurezza.
+- Il progressivo è calcolato scansionando i DDT locali **della serie attiva e dello stesso
+  anno** — confrontando serie e primi due caratteri del numero — e prendendo il massimo + 1.
+  Serie diverse hanno progressivi indipendenti. Il contatore su IndexedDB viene aggiornato come
+  copia di sicurezza.
 - Il codice agente ha **lunghezza variabile** (2 o 3 caratteri) ed è un identificativo assegnato,
   non derivabile meccanicamente dal nome dell'utente: vedi [USERS.md](USERS.md#2-utenti-abilitati).
   Il parsing del numero deve quindi basarsi sui **primi 5 caratteri** (anno + progressivo) e
@@ -169,24 +180,36 @@ valori legacy convertiti.
 
 ---
 
-## 8. Payload di backup
+## 8. Coda offline
 
-Snapshot inviato al backend e conservato su Drive:
+Le scritture eseguite senza rete vengono accodate in `localStorage` (`ddtOpsPending`) come
+operazioni autocontenute:
 
 ```json
-{
-  "version": 1,
-  "updatedAt": "2026-01-15T09:40:00.000Z",
-  "ddt": [],
-  "counters": [{ "anno": "26", "last": 42 }]
-}
+{ "azione": "upsert", "serie": "MS", "anno": 2026, "ddt": { "id": "…", "…": "…" } }
 ```
+
+```json
+{ "azione": "delete", "serie": "MS", "anno": 2026, "id": "…" }
+```
+
+Regole:
+
+- un'operazione più recente sullo **stesso documento** sostituisce quella in coda;
+- la coda viene svuotata in ordine al ritorno della rete, all'avvio e prima di ogni sync;
+- un errore di rete interrompe lo svuotamento (si riproverà); una sessione scaduta lo sospende
+  fino al nuovo login; un errore applicativo scarta la singola operazione.
 
 ---
 
-## 9. Regole di merge
+## 9. Sincronizzazione e merge
 
-`mergeDDTLists()` unisce lista locale e lista remota:
+La sincronizzazione legge gli archivi remoti dell'utente (ogni serie abilitata × anno corrente e
+precedente). **A coda vuota il server è autorevole**: la lista locale viene sostituita da quella
+remota, propagando anche le eliminazioni fatte da altri dispositivi.
+
+Con operazioni ancora in coda — o con un remoto inaspettatamente vuoto a fronte di dati locali —
+si applica il merge conservativo di `mergeDDTLists()`:
 
 1. Chiave di identità: `id`; in mancanza, `numero`. I record senza entrambi vengono scartati.
 2. In caso di duplicato vince il record con `updatedAt` più recente, che sovrascrive l'altro
@@ -197,7 +220,7 @@ Snapshot inviato al backend e conservato su Drive:
 
 ---
 
-## 10. Modello definitivo: archivi separati
+## 10. Archivi separati
 
 ### 10.1 Serie documentale
 
@@ -239,44 +262,37 @@ valido, vedi [USERS.md](USERS.md#2-utenti-abilitati)).
 
 ```json
 {
-  "metadata": {
-      "serie": "MS",
-      "mittente": "Zimmer Biomet Italia",
-      "agente": "Giovanni Bennardo",
-      "codiceAgente": "GBE",
-      "anno": 2027,
-      "versione": 1
-  },
-  "progressivo": 125,
-  "documenti": []
+  "version": 1,
+  "updatedAt": "2026-07-22T09:40:00.000Z",
+  "ddt": [],
+  "counters": []
 }
 ```
 
 | Campo | Tipo | Significato |
 | --- | --- | --- |
-| `metadata.serie` | `string` | Sigla della serie documentale. |
-| `metadata.mittente` | `string` | Ragione sociale del soggetto emittente. |
-| `metadata.agente` | `string` | Nome esteso dell'utente, per leggibilità e per la dashboard. |
-| `metadata.codiceAgente` | `string` | Codice agente, usato nella numerazione e nel nome archivio. |
-| `metadata.anno` | `number` | Anno di competenza dell'archivio. |
-| `metadata.versione` | `number` | Versione dello schema dell'archivio, per future migrazioni. |
-| `progressivo` | `number` | Ultimo progressivo utilizzato nell'archivio. |
-| `documenti` | `DDT[]` | Elenco dei documenti, nel formato descritto in §2. |
+| `version` | `number` | Versione dello schema dell'archivio, per future migrazioni. |
+| `updatedAt` | `string \| null` | Timestamp ISO dell'ultima scrittura, valorizzato dal backend. |
+| `ddt` | `DDT[]` | Elenco dei documenti, nel formato descritto in §2. |
+| `counters` | `array` | Residuo storico dei contatori; non usato dalle operazioni v2. |
 
-I campi di `metadata` sono **ridondanti rispetto al nome del file**: il nome resta l'identificatore
-operativo, `metadata` rende l'archivio autodescrittivo anche se estratto dal suo contesto. In caso
-di discordanza fa fede il contenuto di `metadata`.
+Serie, agente e anno dell'archivio sono espressi dal **nome del file**, interpretato per
+posizione (§10.2); il backend lo risolve da token + parametri, il contenuto non li ripete.
+
+> **Scelta di progetto.** Una versione precedente di questo documento prevedeva un involucro
+> `{ metadata, progressivo, documenti }`. L'implementazione ha mantenuto invece lo schema
+> storico `{ version, updatedAt, ddt, counters }`, identico per ogni archivio: nessuna
+> conversione in migrazione, nessun doppio formato. Un blocco `metadata` autodescrittivo resta
+> un'estensione possibile (campo nuovo, non breaking) se la dashboard ne avrà bisogno.
 
 ### 10.4 Gestione del progressivo
 
 - Il progressivo è **locale all'archivio**: ogni combinazione serie + agente + anno ha la propria
   sequenza, indipendente da tutte le altre.
-- Il nuovo numero è `progressivo + 1`; il campo viene aggiornato contestualmente all'inserimento
-  del documento.
+- Non esiste un campo contatore nell'archivio: il prossimo numero si ricava scansionando i
+  documenti della serie per l'anno dato e prendendo il massimo + 1 (§5.2). I documenti sono
+  l'unica fonte di verità.
 - Al cambio di anno nasce un nuovo archivio e il progressivo riparte da zero.
-- Il valore resta comunque ricalcolabile scansionando `documenti`: `progressivo` è un indice di
-  servizio, non l'unica fonte di verità. Questo mantiene la logica di recupero già presente
-  nell'applicazione attuale (vedi §5).
 
 ### 10.5 Vantaggi degli archivi separati
 
@@ -296,12 +312,11 @@ Aggiungere un archivio è un'operazione di configurazione: nasce alla prima emis
 documento per una combinazione serie + agente + anno non ancora presente. Nuovi agenti, nuove
 serie e nuovi anni non richiedono modifiche al modello dati, al frontend o al backend.
 
-### 10.7 Compatibilità con l'archivio attuale
+### 10.7 Origine dei dati storici
 
-L'archivio unico odierno (`{ version, updatedAt, ddt, counters }`, §8) corrisponde a un singolo
-archivio della serie `MS` per l'agente `GBE`. La migrazione consiste nel riversarne i documenti in
-`MS_GBE_<ANNO>.json` valorizzando `metadata` e `progressivo`, senza alcuna modifica alla struttura
-del singolo DDT.
+Lo storico dell'applicazione a utente singolo (60 DDT al 22/07/2026) è stato migrato in
+`MS_GBE_2026.json` senza alcuna modifica alla struttura dei documenti; i DDT privi di campo
+`serie` ricevono `MS` in normalizzazione.
 
 ---
 

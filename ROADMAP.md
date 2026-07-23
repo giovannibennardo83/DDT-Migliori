@@ -6,9 +6,12 @@ Piano di evoluzione di DDT Migliori da applicazione personale a piattaforma mult
 
 ## Visione
 
-Trasformare l'attuale applicazione DDT a uso singolo in una piattaforma destinata a una
-microimpresa composta da una **ventina di agenti commerciali** e da un **ufficio amministrativo
-centrale**, mantenendo piena compatibilità con il progetto esistente.
+Trasformare l'applicazione DDT a uso singolo in una piattaforma destinata a una microimpresa
+composta da una **ventina di agenti commerciali** e da un **ufficio amministrativo centrale**.
+
+**Stato (luglio 2026): la trasformazione multiutente è realizzata** — login, archivi separati,
+operazioni per documento, coda offline. Restano la dashboard amministrativa (M11) e la
+pubblicazione (M12).
 
 Il dimensionamento è indicativo: l'architettura è pensata per non dover cambiare al variare del
 numero di utenti. La configurazione aziendale reale è documentata in [docs/USERS.md](docs/USERS.md).
@@ -29,15 +32,15 @@ numero di utenti. La configurazione aziendale reale è documentata in [docs/USER
 
 ## Direzione architetturale
 
-| Ambito | Oggi | Obiettivo |
-| --- | --- | --- |
-| Frontend | HTML / CSS / JS vanilla | invariato |
-| Persistenza locale | `localStorage` + IndexedDB | invariata |
-| Accesso al backend | `fetch` diretto da `app.js` | Storage Service come livello di astrazione |
-| Backend | Google Apps Script | Apps Script evoluto, multiarchivio |
-| Storage | Google Drive | Google Drive |
-| Archivi | archivio JSON unico | un archivio JSON per serie, agente e anno |
-| Consultazione | solo device dell'agente | dashboard amministrativa centralizzata |
+| Ambito | Stato raggiunto (07/2026) |
+| --- | --- |
+| Frontend | HTML / CSS / JS vanilla, invariato ✅ |
+| Persistenza locale | `localStorage` + IndexedDB, invariata ✅ |
+| Accesso al backend | Storage Service (`storage.js`) come livello di astrazione ✅ |
+| Backend | Apps Script v2: multiarchivio, operazioni per documento, login a PIN ✅ |
+| Storage | Google Drive dedicato (`DDT-Migliori/Archivi/`) ✅ |
+| Archivi | un archivio JSON per serie, agente e anno ✅ |
+| Consultazione | dashboard amministrativa centralizzata ⏳ (M11) |
 
 Dettagli in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -48,10 +51,10 @@ Dettagli in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Legenda stato: ☐ da fare · ◐ in corso · ☑ completata
 
 ### ☑ M01 — Centralizzazione configurazione backend
-Endpoint remoti raccolti in costanti dedicate (`BACKUP_URL`, `OCR_URL`) in testa a `app.js`,
-al posto degli URL ripetuti nei punti di chiamata. Resta come passo successivo, non bloccante,
-l'estrazione delle costanti in un `config.js` separato: sarà affrontata insieme a M05, quando
-la configurazione dovrà includere anche serie, mittenti e archivi.
+Endpoint remoti prima raccolti in costanti in testa a `app.js`, poi estratti nel `config.js`
+dedicato (con M05). Serie, mittenti e utenti sono invece configurazione **lato backend**
+(`utenti.json` su Drive), scelta maturata con il login: modificarli non richiede deploy del
+frontend.
 
 ### ☑ M02 — Riorganizzazione documentazione
 Struttura documentale completa: `README.md`, `CLAUDE.md`, `ROADMAP.md`, `CHANGELOG.md` e la
@@ -59,42 +62,59 @@ cartella `docs/` con architettura, modello dati, contratti API e modello utenti.
 descrive sia lo stato attuale sia l'architettura obiettivo, così da accompagnare le milestone
 successive senza dover essere riscritta.
 
-### ☐ M03 — Nuovo Apps Script di test
-Ambiente backend separato da quello di produzione per sperimentare senza rischi.
+### ☑ M03 — Nuovo backend Apps Script
+Nuovo Apps Script nel Google account del progetto, con Drive dedicato. Deviazione rispetto al
+piano originale (che prevedeva un ambiente di test separato): la produzione è stata **duplicata**
+dall'utente, quindi il repository corrente è a tutti gli effetti l'ambiente di evoluzione e il
+nuovo backend vi è andato direttamente. Lo storico (60 DDT) è stato migrato e verificato.
 
-### ☐ M04 — Nuovo Google Drive
-Spazio di storage dedicato al nuovo modello ad archivi separati.
+### ☑ M04 — Nuovo Google Drive
+Struttura dedicata `DDT-Migliori/Archivi/` nel Drive del progetto, con `utenti.json` in radice.
 
-### ☐ M05 — Storage Service
-Livello di astrazione lato frontend tra la logica applicativa e il backend: `app.js` smette di
-chiamare `fetch` direttamente e passa da un'interfaccia unica orientata all'archivio. È il
-prerequisito che rende trasparenti al frontend tutte le milestone successive.
+### ☑ M05 — Storage Service
+`storage.js`: unico punto di contatto col backend. Sessione con token, operazioni per documento,
+coda offline con invio automatico al ritorno della rete. `app.js` non esegue più `fetch` diretti
+verso il backend dati.
 
-### ☐ M06 — Archivi JSON separati
-Un file JSON per ogni combinazione serie + agente + anno, secondo lo standard
-`<SERIE>_<CODICEAGENTE>_<ANNO>.json` (es. `MS_GBE_2027.json`, `PM_MRU_2027.json`).
+### ☑ M06 — Archivi JSON separati
+Un file per ogni combinazione serie + agente + anno, standard
+`<SERIE>_<CODICEAGENTE>_<ANNO>.json`, creato alla prima scrittura.
 
-### ☐ M07 — Backend multiarchivio
-Apps Script capace di leggere e scrivere su più archivi, con routing per serie, agente e anno,
-mantenendo la compatibilità con gli endpoint attuali.
+### ☑ M07 — Backend multiarchivio a operazioni per documento
+Deviazione migliorativa rispetto al piano: oltre al routing per serie/agente/anno, il contratto è
+passato dalla sovrascrittura integrale dell'archivio alle operazioni sul singolo documento
+(`upsert` / `delete`), con lock sulle scritture. La compatibilità col vecchio contratto **non** è
+stata mantenuta: non essendoci utenti in produzione sul nuovo backend, non serviva. Questo chiude
+per costruzione l'incidente di svuotamento del 22/07/2026.
 
-### ☐ M08 — Login utenti
-Autenticazione degli agenti e associazione utente → archivi accessibili.
+### ☑ M08 — Login utenti
+Autenticazione con codice agente + PIN (hash lato server, sessioni a token con scadenza a
+scorrimento di 30 giorni). PIN iniziali a schema `CODICE1234` con **cambio obbligatorio al primo
+accesso**; cambio PIN autonomo dalla barra utente; reset da amministratore via editor Apps Script.
+Al cambio di utente sul dispositivo i dati locali del precedente vengono azzerati.
 
-### ☐ M09 — Gestione serie documentali e mittenti
-Selezione della serie attiva per gli utenti abilitati a più di una; il mittente stampato deriva
-dalla serie e non è più una costante applicativa.
+### ☑ M09 — Gestione serie documentali e mittenti
+Serie e mittenti configurati in `utenti.json` sul Drive. Gli utenti abilitati a più serie
+scelgono quella attiva al login e possono cambiarla dalla barra; il mittente stampato deriva
+dalla serie del documento.
 
-### ☐ M10 — Numerazione per archivio
-Progressivi calcolati indipendentemente su ciascun archivio, formato `<AA><PPP><CODICEAGENTE>`
-(es. `27001GBE`).
+### ☑ M10 — Numerazione per archivio
+Progressivi calcolati per serie attiva e anno del documento, formato `<AA><PPP><CODICEAGENTE>`;
+il codice agente arriva dalla sessione.
 
 ### ☐ M11 — Dashboard amministrativa
-Consultazione centralizzata in sola lettura: ricerca per cliente e per agente, ristampa PDF,
-export dati.
+Consultazione centralizzata in sola lettura con l'utenza `ADMIN` (già prevista dal backend):
+ricerca per cliente e per agente, ristampa PDF dal JSON, export dati.
 
-### ☐ M12 — Ottimizzazione e rilascio
-Consolidamento, verifica delle prestazioni e messa in produzione.
+### ☐ M12 — Pubblicazione
+Deploy della PWA su Vercel, repository GitHub reso privato, consolidamento e distribuzione dei
+PIN iniziali agli agenti.
+
+> **Baseline.** Le milestone M01–M10 costituiscono la **baseline definitiva del backend v2**:
+> multiarchivio per serie/agente/anno, operazioni atomiche per documento, autenticazione a PIN
+> con autorizzazioni lato server. Gli sviluppi successivi (dashboard, pubblicazione, futuri
+> irrobustimenti) si costruiscono sopra questa base senza rimetterla in discussione; ogni
+> proposta che la contraddica va trattata come revisione architetturale, non come evoluzione.
 
 ---
 

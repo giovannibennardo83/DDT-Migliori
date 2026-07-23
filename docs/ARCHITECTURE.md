@@ -1,35 +1,39 @@
 # Architettura
 
-Descrizione dell'architettura attuale del sistema e della direzione verso l'architettura obiettivo.
+Descrizione dell'architettura del sistema. Dal luglio 2026 l'architettura multiutente descritta
+in origine come "obiettivo" è **realizzata**: questo documento la descrive al presente.
 
 ---
 
 ## 1. Quadro generale
 
-DDT Migliori è una **PWA statica** senza build step: i file sorgente vengono serviti così come
-sono. Tutta la logica applicativa risiede nel browser; il backend è un servizio minimale usato
-per il backup dei dati e per l'OCR.
+DDT Migliori è una **PWA statica multiutente** senza build step: i file sorgente vengono serviti
+così come sono. Tutta la logica applicativa risiede nel browser; il backend Apps Script gestisce
+autenticazione e archivi su Google Drive, il servizio OCR è una funzione serverless separata.
 
 ```
-┌──────────────────────────────────────────────┐
-│                  BROWSER                     │
-│                                              │
-│  index.html ── app.js ── db.js               │
-│      │           │         │                 │
-│      │           │         ├─ localStorage   │  (DDT)
-│      │           │         └─ IndexedDB      │  (contatori)
-│      │           │                           │
-│      │           ├──► servizio OCR (HTTPS)   │
-│      │           └──► Google Apps Script     │
-│      │                                       │
-│  print.html ── print.css  ──► PDF (stampa)   │
-│                                              │
-│  sw.js  (cache offline)                      │
-└──────────────────────────────────────────────┘
-                     │              │
-                     ▼              ▼
-             OpenAI Vision    Google Drive
-              (via /api/ocr)   (archivio JSON)
+┌────────────────────────────────────────────────────┐
+│                     BROWSER                        │
+│                                                    │
+│  index.html (login + app)                          │
+│      │                                             │
+│  app.js ─── db.js ──┬─ localStorage  (DDT, coda,   │
+│      │      │       │                 sessione)    │
+│      │      │       └─ IndexedDB     (contatori)   │
+│      │      │                                      │
+│      │   storage.js ──► Apps Script v2 (HTTPS)     │
+│      │                  login·leggi·upsert·delete  │
+│      ├──► servizio OCR (HTTPS)                     │
+│      │                                             │
+│  print.html ── print.css  ──► PDF (stampa)         │
+│  sw.js  (cache offline, ddt-cache-vN)              │
+└────────────────────────────────────────────────────┘
+                     │                    │
+                     ▼                    ▼
+             OpenAI Vision          Google Drive
+              (via /api/ocr)   DDT-Migliori/Archivi/
+                                <SERIE>_<COD>_<ANNO>.json
+                                + utenti.json
 ```
 
 ---
@@ -40,39 +44,47 @@ per il backup dei dati e per l'OCR.
 
 | File | Responsabilità |
 | --- | --- |
-| `index.html` | Struttura della UI: form di testata, contenitore righe, archivio, modale firma. |
-| `app.js` | Orchestrazione completa: gestione righe, validazioni, OCR, firma, numerazione, backup, sync, rendering della lista. |
-| `db.js` | Livello di persistenza: lettura/scrittura DDT, normalizzazione, contatori progressivi. |
+| `index.html` | Struttura della UI: schermata di login, form di testata, contenitore righe, archivio, modale firma, barra utente. |
+| `config.js` | Endpoint dell'applicazione (`backendUrl`, `ocrUrl`). |
+| `storage.js` | **Storage Service**: sessione e token, login/logout/cambio PIN, operazioni per documento, coda offline, lettura archivi remoti. |
+| `app.js` | Orchestrazione: gestione righe, validazioni, OCR, firma, numerazione, sync, login UI, rendering della lista. |
+| `db.js` | Persistenza locale: lettura/scrittura DDT, normalizzazione, contatori progressivi. |
 | `styles.css` | Stili UI; su mobile le righe diventano card. |
 | `print.html` / `print.css` | Documento di stampa, 12 righe per pagina con paginazione automatica. |
 
-`app.js` è un modulo unico organizzato per aree funzionali (firma, righe, OCR, backup/sync,
-rendering). Non usa moduli ES né import: gli script sono caricati in sequenza dall'HTML e
-condividono lo scope globale — `db.js` va caricato **prima** di `app.js`.
+Gli script non usano moduli ES né import: sono caricati in sequenza dall'HTML e condividono lo
+scope globale. L'ordine è vincolante: `config.js` → `storage.js` → `db.js` → `app.js`.
 
 ### 2.2 Persistenza locale
 
-- **`localStorage`**, chiave `ddtRecords`: array JSON di tutti i DDT.
+- **`localStorage`** — `ddtRecords`: i DDT dell'utente; `ddtSession`: token e profilo di
+  sessione; `ddtOpsPending`: coda delle operazioni offline; `ddtLastUser`: ultimo codice agente
+  (per azzerare i dati locali al cambio di utente); `printDDT`: payload di stampa.
 - **IndexedDB**, database `ddt-db` (v1), object store `counters` con `keyPath: 'anno'`:
   ultimo progressivo utilizzato per anno, usato come backup del calcolo della numerazione.
 
-La fonte di verità per la numerazione è comunque la scansione dei DDT esistenti; l'IndexedDB
-conserva una copia di sicurezza del contatore.
+La fonte di verità per la numerazione è comunque la scansione dei DDT esistenti (filtrata per
+serie attiva); l'IndexedDB conserva una copia di sicurezza del contatore.
 
 ### 2.3 Livello offline
 
 `sw.js` implementa una strategia **cache-first** su un elenco statico di asset
-(`index.html`, `app.js`, `db.js`, `styles.css`, `print.html`, `print.css`, `manifest.json`).
-La cache è versionata (`ddt-cache-vN`) e le versioni precedenti vengono eliminate all'`activate`.
+(`index.html`, `config.js`, `storage.js`, `app.js`, `db.js`, `styles.css`, `print.html`,
+`print.css`, `manifest.json`). La cache è versionata (`ddt-cache-vN`) e le versioni precedenti
+vengono eliminate all'`activate`.
 
 > Ogni modifica alla lista di asset richiede l'incremento della versione della cache.
+
+L'offline applicativo è gestito dallo Storage Service: le scritture senza rete finiscono in una
+**coda persistente** e vengono reinviate automaticamente (evento `online`, avvio, prima di ogni
+sync). Il login richiede la rete; la sessione, una volta creata, vale anche offline.
 
 ### 2.4 Servizi remoti
 
 | Servizio | Endpoint | Ruolo |
 | --- | --- | --- |
 | OCR | `POST /api/ocr` (funzione serverless) | Estrazione dati da immagine tramite OpenAI Vision. |
-| Backup / Sync | Google Apps Script Web App | Lettura e scrittura dell'archivio JSON su Google Drive. |
+| Backend dati | Apps Script v2 Web App (`POST` con `azione`) | Login, autorizzazione, lettura archivi, upsert/delete per documento su Google Drive. |
 
 Contratti dettagliati in [API.md](API.md).
 
@@ -80,26 +92,44 @@ Contratti dettagliati in [API.md](API.md).
 
 ## 3. Flussi principali
 
+### 3.0 Accesso
+
+1. Senza sessione, l'app mostra la **schermata di login** (codice agente + PIN).
+2. Al primo accesso il PIN iniziale (schema `CODICE1234`) va sostituito obbligatoriamente.
+3. Gli utenti abilitati a più serie scelgono la **serie attiva**; il profilo e i mittenti per
+   serie arrivano dal backend col login e restano nella sessione.
+4. Se sul dispositivo accede un codice diverso dal precedente, i dati locali vengono azzerati e
+   riscaricati dagli archivi del nuovo utente.
+
 ### 3.1 Creazione di un DDT
 
 1. L'utente compila la testata, oppure lancia l'OCR del documento di scarico che la precompila.
 2. Le righe vengono aggiunte manualmente o via OCR etichetta.
-3. Alla richiesta di numerazione, `getNextDDTNumber()` calcola il progressivo dell'anno.
+3. Alla richiesta di numerazione, `getNextDDTNumber()` calcola il progressivo per **serie attiva
+   e anno del documento**, col codice agente della sessione.
 4. Al salvataggio, i dati passano da `normalizeDDTStorage()` e vengono scritti in `localStorage`.
    Vengono conservate **tutte** le righe compilate: nessun passaggio applica un limite.
-5. Viene avviato in background il backup verso Apps Script.
+5. Lo Storage Service invia l'**`upsert` del solo documento** all'archivio corrispondente
+   (serie del documento + anno della sua data); senza rete l'operazione va in coda.
+
+L'eliminazione segue lo stesso schema con l'operazione `delete`.
 
 ### 3.2 Sincronizzazione
 
-`syncDDT()` viene eseguita quando il dispositivo è online e non c'è già una sync in corso:
+`syncDDT()` viene eseguita all'avvio, ogni 5 minuti e all'evento `online`, se esiste una
+sessione e non c'è già una sync in corso:
 
-1. Legge i DDT locali e scarica l'archivio remoto.
-2. `mergeDDTLists()` unisce le due liste con chiave `id` (fallback `numero`), risolvendo i
-   conflitti in base a `updatedAt` e preservando sempre la firma del destinatario più recente.
-3. Il risultato viene salvato in locale, i contatori aggiornati e la lista ri-renderizzata.
+1. **Svuota la coda** delle operazioni in attesa.
+2. Legge gli archivi remoti dell'utente: ogni serie abilitata × anno corrente e precedente.
+3. A coda vuota **il server è autorevole**: la lista locale viene sostituita, così le
+   eliminazioni fatte da altri dispositivi si propagano. Con operazioni ancora in coda — o con
+   un remoto inaspettatamente vuoto a fronte di dati locali — si applica il merge conservativo
+   di `mergeDDTLists()` (chiave `id`, conflitti risolti su `updatedAt`, firma del destinatario
+   sempre preservata).
+4. Il risultato viene salvato in locale, i contatori aggiornati e la lista ri-renderizzata.
 
-Il backup applica inoltre una **safety check**: se l'archivio remoto risulta più recente di
-quello locale, la scrittura viene annullata per non sovrascrivere dati altrui.
+Non esiste più alcuna scrittura dell'archivio completo: la classe di incidenti "un client
+sovrascrive tutto" (accaduto il 22/07/2026 col vecchio contratto) è chiusa per costruzione.
 
 ### 3.3 Stampa
 
@@ -127,25 +157,26 @@ sono più di una: sul caso a pagina singola l'output resta identico al modulo st
 
 ---
 
-## 4. Architettura obiettivo
+## 4. Architettura multiutente
 
-L'evoluzione multiutente mantiene invariati l'interfaccia e la persistenza locale. Le modifiche si
-concentrano sul backend e sull'organizzazione dello storage; sul frontend l'unica aggiunta
-strutturale è lo **Storage Service**, che isola il resto del codice da entrambi.
+L'evoluzione multiutente (completata a luglio 2026) ha mantenuto invariati l'interfaccia di
+compilazione e la persistenza locale. Le modifiche si sono concentrate sul backend e
+sull'organizzazione dello storage; sul frontend le aggiunte strutturali sono lo **Storage
+Service** e la **schermata di login**.
 
-| Livello | Oggi | Obiettivo |
-| --- | --- | --- |
-| Frontend | invariato | invariato |
-| Persistenza locale | `localStorage` + IndexedDB | invariata |
-| Configurazione | costanti in testa a `app.js` | `config.js` con serie, mittenti e archivi |
-| Accesso al backend | `fetch` diretto da `app.js` | Storage Service come livello di astrazione |
-| Backend | Apps Script a singolo archivio | Apps Script multiarchivio con routing |
-| Storage | un JSON complessivo | un JSON per serie, agente e anno |
-| Accesso | nessuna autenticazione | login utente + selezione della serie |
-| Consultazione | locale al dispositivo | dashboard amministrativa centralizzata |
+| Livello | Realizzazione |
+| --- | --- |
+| Frontend | invariato nella compilazione; aggiunti login e barra utente |
+| Persistenza locale | `localStorage` + IndexedDB, invariata; aggiunte sessione e coda |
+| Configurazione | endpoint in `config.js`; utenti, serie e mittenti in `utenti.json` sul Drive |
+| Accesso al backend | Storage Service (`storage.js`) come livello di astrazione |
+| Backend | Apps Script v2 multiarchivio, operazioni per documento, lock sulle scritture |
+| Storage | un JSON per serie, agente e anno |
+| Accesso | login con codice + PIN, token di sessione, selezione della serie |
+| Consultazione | dashboard amministrativa centralizzata (M11, in arrivo) |
 
-Ogni archivio manterrà: progressivo, documenti e metadata. La distinzione tra mittenti avviene a
-livello di archivio, non di numerazione (vedi [DATA_MODEL.md](DATA_MODEL.md) e [USERS.md](USERS.md)).
+La distinzione tra mittenti avviene a livello di archivio, non di numerazione (vedi
+[DATA_MODEL.md](DATA_MODEL.md) e [USERS.md](USERS.md)).
 
 ### 4.1 Catena dei livelli
 
@@ -169,31 +200,27 @@ in sola lettura, non un'applicazione parallela che scrive sugli stessi dati.
 
 ### 4.2 Storage Service
 
-Lo **Storage Service** è il livello di astrazione tra la logica applicativa e il backend. Oggi
-`app.js` chiama `fetch` direttamente verso l'URL di Apps Script; nel modello obiettivo passa da
-un'unica interfaccia orientata all'archivio, del tipo *leggi l'archivio X*, *scrivi il documento Y
-sull'archivio X*, *ottieni il prossimo progressivo dell'archivio X*.
+Lo **Storage Service** (`storage.js`) è il livello di astrazione tra la logica applicativa e il
+backend: `app.js` e `db.js` non eseguono `fetch` verso Apps Script, passano da un'unica
+interfaccia orientata al documento (`login`, `leggiRemoti`, `upsert`, `remove`, `cambiaPin`,
+`flushQueue`).
 
 Cosa incapsula:
 
-- la risoluzione **serie + agente + anno → nome archivio**;
-- la scelta tra copia locale e copia remota, e la strategia offline;
-- il merge tra dati locali e remoti;
-- il dettaglio del trasporto (URL, formato della richiesta, gestione degli errori).
+- la sessione: token, profilo utente, serie attiva, mittenti per serie;
+- il routing delle operazioni: la serie del documento e l'anno della sua data determinano
+  l'archivio di destinazione (il codice agente lo mette il server, dal token);
+- la **coda offline** e le regole di reinvio;
+- il dettaglio del trasporto (URL, formato della richiesta, mappatura degli errori, evento di
+  sessione scaduta).
 
 Cosa ne guadagna il progetto:
 
-- il resto di `app.js` non conosce né URL né nomi di file: cambiare backend o convenzione di
-  nomenclatura non tocca la logica di compilazione del DDT;
-- il passaggio da archivio unico a multiarchivio diventa una modifica **interna a un solo
-  componente**, invece che diffusa nel codice;
-- la dashboard amministrativa può riusare la stessa astrazione in sola lettura;
-- il comportamento offline resta concentrato in un punto solo, riducendo il rischio di regressioni
-  su una delle funzionalità più delicate.
-
-È il motivo per cui lo Storage Service (M05) precede il backend multiarchivio (M07) nella
-[roadmap](../ROADMAP.md): introdurre prima l'astrazione rende le milestone successive trasparenti
-al frontend.
+- il resto del codice non conosce né URL né nomi di file: cambiare backend o convenzione di
+  nomenclatura è una modifica interna a un solo componente;
+- la dashboard amministrativa potrà riusare la stessa astrazione in sola lettura;
+- il comportamento offline resta concentrato in un punto solo, riducendo il rischio di
+  regressioni su una delle funzionalità più delicate.
 
 ### 4.3 Crescita da pochi utenti a decine di agenti
 
@@ -219,12 +246,16 @@ l'architettura.
 
 ## 5. Vincoli e debiti tecnici noti
 
-- Assenza di test automatici: ogni verifica è manuale.
+- Assenza di test automatici: ogni verifica è manuale (le verifiche di milestone sono state
+  eseguite con batterie di chiamate reali, ma non sono ripetibili con un comando).
 - `app.js` è un file unico di dimensioni rilevanti, senza separazione in moduli.
-- URL di produzione hard-coded nel frontend: centralizzati in costanti in testa a `app.js` (M01),
-  ma non ancora estratti in un `config.js` separato.
-- `app.js` chiama `fetch` direttamente: manca il livello di astrazione previsto da M05.
-- Nessuna autenticazione: l'endpoint di backup è raggiungibile da chiunque conosca l'URL.
+- L'autenticazione è applicativa su deployment pubblico, senza rate limiting; il salt dei PIN è
+  una costante nello script Apps Script (vedi [API.md](API.md#3-sicurezza--stato-attuale)).
+- Il codice del backend Apps Script v2 non è versionato in questo repository: vive solo
+  nell'editor di Apps Script. Una copia andrebbe salvata nel repo o in un repo dedicato.
+- Un DDT eliminato mentre un altro dispositivo dello **stesso utente** è offline può riapparire
+  sul dispositivo offline fino alla sua prima sync a coda vuota (poi il server, autorevole, lo
+  rimuove anche lì). Non ci sono tombstone.
 - `ROWS_PER_PAGE` è definita in `print.html` e non deriva da una costante condivisa con il resto
   dell'applicazione: un'eventuale modifica del modulo va riportata a mano.
 - Il layout di stampa non è verificato automaticamente: il caso multipagina va ricontrollato a

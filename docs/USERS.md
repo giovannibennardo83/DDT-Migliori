@@ -8,11 +8,11 @@ Il documento è diviso in due parti:
 - **Modello architetturale** — le regole che governano utenti, serie e archivi, e che non devono
   cambiare al variare del numero di utenti.
 
-> **Stato dell'applicazione.** Il codice è oggi a **utente singolo**: non esiste autenticazione,
-> il mittente è una costante applicativa (`MITTENTE_FISSO` in `app.js`) e il codice agente nella
-> numerazione è fisso (`GBE`). Quanto descritto in questo documento è la configurazione di
-> riferimento verso cui l'applicazione evolverà con le milestone M08–M11 della
-> [roadmap](../ROADMAP.md).
+> **Stato dell'applicazione.** Il modello descritto è **implementato** (luglio 2026): login con
+> codice agente + PIN, serie selezionabile, archivi per serie/agente/anno. La configurazione
+> reale vive in **`utenti.json`** nella cartella `DDT-Migliori` su Google Drive — utenti, serie
+> abilitate, hash dei PIN e mittenti per serie — letta dal backend a ogni richiesta. Le tabelle
+> di questo documento ne sono la descrizione, non la fonte.
 
 ---
 
@@ -37,8 +37,9 @@ Entrambi i soggetti hanno sede in Via Catira Savoca 1, 95037 San Giovanni La Pun
 
 ## 2. Utenti abilitati
 
-Configurazione di partenza per l'anno **2027**. Per ogni utente: nome, codice agente, ruolo,
-serie abilitate e archivi JSON associati.
+Utenze configurate in `utenti.json` (esempio di archivi riferito all'anno **2027**; gli archivi
+di ciascun anno nascono alla prima emissione). Oltre alle utenze in tabella esiste **`ADMIN`**
+(Amministrazione, ruolo `admin`, abilitata in lettura a entrambe le serie) per la dashboard.
 
 | Nome | Codice | Ruolo | Serie abilitate | Archivi |
 | --- | --- | --- | --- | --- |
@@ -67,8 +68,19 @@ serie abilitate e archivi JSON associati.
 | Commerciale | `CS` | Postazione di struttura | MS · PM | `MS_CS_2027.json` · `PM_CS_2027.json` |
 | Magazzino | `MG` | Postazione di struttura | MS · PM | `MS_MG_2027.json` · `PM_MG_2027.json` |
 
-Sintesi: **24 utenze**, di cui 22 agenti e 2 postazioni di struttura; **20 abilitate alla sola
-serie MS** e **4 abilitate a entrambe le serie**. Gli archivi risultanti per il 2027 sono 28.
+Sintesi: **25 utenze** — 22 agenti, 2 postazioni di struttura e l'utenza amministrativa;
+**20 abilitate alla sola serie MS** e **4 operative su entrambe le serie**. Gli archivi
+risultanti per un anno pieno sono 28.
+
+### 2.1 Credenziali
+
+- Ogni utenza accede con **codice + PIN**. I PIN iniziali seguono lo schema `CODICE1234`
+  (es. `GBE1234`) e l'app **impone la sostituzione al primo accesso**.
+- L'agente cambia il PIN in autonomia dalla barra utente (serve il PIN attuale).
+- Reset di un PIN dimenticato: l'amministratore esegue `impostaPin('CODICE', 'nuovo')`
+  dall'editor Apps Script. La funzione `setupPinIniziali()` riporta **tutti** i PIN allo schema
+  iniziale: è solo per emergenze.
+- Le sessioni durano 30 giorni e si rinnovano a ogni uso; il logout le revoca.
 
 > **Nota sui codici agente.** I codici hanno lunghezza variabile (2 o 3 caratteri) e alcuni non
 > derivano meccanicamente dalle iniziali del nome: `GBE` per Giovanni Bennardo distingue l'utente
@@ -162,23 +174,23 @@ Struttura e nomenclatura degli archivi sono definite in [DATA_MODEL.md](DATA_MOD
 
 ## 6. Aggiungere un nuovo utente
 
-L'inserimento di un agente deve essere un'operazione di **configurazione**, mai di sviluppo.
-Richiede tre passi:
+L'inserimento di un agente è un'operazione di **configurazione**, mai di sviluppo. In pratica:
 
-1. **Inserimento dell'utente** nell'elenco delle utenze abilitate.
-2. **Assegnazione del codice agente**, univoco e stabile nel tempo.
-3. **Assegnazione delle serie documentali abilitate.**
+1. **Aggiungere l'utente a `utenti.json`** su Drive (a mano o dall'editor Apps Script):
+   `{ "codice": "XY", "nome": "Nome Cognome", "serie": ["MS"], "ruolo": "agente", "attivo": true, "pinHash": null }`.
+2. **Assegnare il PIN iniziale** con `impostaPin('XY', 'XY1234')` dall'editor Apps Script.
+3. **Consegnare codice e PIN** all'agente, che al primo accesso dovrà sostituirlo.
 
-Gli archivi corrispondenti vengono creati alla prima emissione di un documento, con progressivo
-inizializzato a zero. Non è richiesta alcuna modifica al frontend, al modello dati o al backend.
+Gli archivi corrispondenti vengono creati alla prima emissione di un documento. Non è richiesta
+alcuna modifica al frontend, al modello dati o al codice del backend.
 
-Le stesse tre operazioni, con segno opposto, valgono per la disattivazione di un utente: gli
-archivi già emessi restano consultabili dalla dashboard e non vengono rimossi.
+Per **disattivare** un utente basta impostare `"attivo": false` in `utenti.json`: login e
+operazioni vengono rifiutati, gli archivi già emessi restano consultabili dalla dashboard.
 
 ## 7. Aggiungere una nuova serie o un nuovo anno
 
-- **Nuova serie**: si definisce la sigla e il mittente associato, e la si abilita agli utenti
-  interessati. Nessun'altra modifica.
+- **Nuova serie**: si aggiunge la voce in `utenti.json` (sigla + righe del mittente nella sezione
+  `serie`) e la si abilita agli utenti interessati. Nessun'altra modifica.
 - **Nuovo anno**: gli archivi dell'anno successivo nascono automaticamente alla prima emissione,
   con progressivo che riparte da zero. Gli archivi degli anni precedenti restano immutati e
   consultabili.
@@ -212,14 +224,16 @@ clinica**. Ne consegue che:
 
 ---
 
-## 10. Autenticazione — considerazioni aperte
+## 10. Autenticazione — scelte fatte e limiti noti
 
-Elementi da definire prima dell'implementazione di M08:
+Le considerazioni un tempo aperte sono state decise così:
 
-- meccanismo di identificazione dell'utente (account Google della microimpresa vs. credenziali
-  applicative dedicate);
-- gestione dell'operatività **offline** dopo il login, coerente con l'uso sul campo;
-- durata e rinnovo della sessione;
-- mantenimento della mappatura utente → codice agente → serie abilitate, e sua manutenzione;
-- protezione degli endpoint di backup e sync, oggi pubblici
-  (vedi [API.md](API.md#3-sicurezza--stato-attuale)).
+- **Credenziali applicative dedicate** (codice + PIN), non account Google: nessun requisito
+  esterno per gli agenti, revoca individuale possibile.
+- **Offline**: il login richiede la rete; la sessione (30 giorni, rinnovo a scorrimento) vale
+  anche offline e le operazioni si accodano.
+- **Mappatura utente → serie → archivi** in `utenti.json` sul Drive, letta dal backend a ogni
+  richiesta: modificarla non richiede deploy.
+- **Protezione dell'endpoint**: l'autorizzazione è applicativa (token, ruoli, serie abilitate);
+  il deployment resta pubblico e senza rate limiting — limiti descritti in
+  [API.md](API.md#3-sicurezza--stato-attuale).
