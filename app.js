@@ -1,12 +1,3 @@
-const MITTENTE_FISSO = [
-  'Zimmer Biomet c/o',
-  'Migliori Service s.r.l. Unipersonale',
-  'Via Catira Savoca 1',
-  '95037 San Giovanni La Punta (CT)',
-  'Cod. Fisc. e P. Iva 04658810876',
-  'Tel. 095 7894844 - Fax 095 7895283',
-].join('\n');
-
 const form = document.getElementById('ddt-form');
 const list = document.getElementById('ddt-list');
 const printLastButton = document.getElementById('print-last');
@@ -25,8 +16,7 @@ const ocrPreview = document.getElementById('ocr-preview');
 let activeOcrRow = null;
 
 
-const BACKUP_URL = 'https://script.google.com/macros/s/AKfycbzg8dEPdItQhJTgClYWts1xhZcw7RMkf896XeCfAjYtMhlO6WI_Pi5mFaKF2FpMwPWBsg/exec';
-const OCR_URL = 'https://ddt-chi.vercel.app/api/ocr';
+const OCR_URL = APP_CONFIG.ocrUrl;
 const numeroInput = document.getElementById('numero');
 const dataInput = document.getElementById('data');
 const clienteRiga1Input = document.getElementById('cliente_riga1');
@@ -248,7 +238,9 @@ function formatDisplayDate(value) {
 }
 
 function formatItem(ddt) {
-  return `${ddt.numero || 'Senza numero'} - ${formatDisplayDate(ddt.data)} - ${ddt.cliente.riga1} (${formatRows(ddt.righe)})`;
+  const multiSerie = (STORAGE.utente()?.serie || []).length > 1;
+  const prefissoSerie = multiSerie ? `[${ddt.serie || 'MS'}] ` : '';
+  return `${prefissoSerie}${ddt.numero || 'Senza numero'} - ${formatDisplayDate(ddt.data)} - ${ddt.cliente.riga1} (${formatRows(ddt.righe)})`;
 }
 
 function setSimpleFieldError(input, message) {
@@ -413,75 +405,11 @@ function loadInForm(ddt, index) {
 
 
 function saveAndPrint(ddt) {
-  localStorage.setItem('printDDT', JSON.stringify({ ...ddt, mittente: MITTENTE_FISSO }));
+  const mittente = STORAGE.mittentePer(ddt.serie || 'MS').join('\n');
+  localStorage.setItem('printDDT', JSON.stringify({ ...ddt, mittente }));
   const printWindow = window.open('print.html', '_blank');
   if (!printWindow) {
     alert('Impossibile aprire la finestra di stampa.');
-  }
-}
-
-async function backupToDrive(options = {}) {
-  const { skipRemoteSafetyCheck = false, ddt: providedDDT = null } = options;
-  console.log('PARTO BACKUP');
-
-  try {
-    const ddt = Array.isArray(providedDDT) ? providedDDT : await getAllDDT();
-    const counters = await getCounters();
-    const localUpdatedAt = new Date().toISOString();
-
-    const data = {
-      version: 1,
-      updatedAt: localUpdatedAt,
-      ddt,
-      counters,
-    };
-    
-    console.log('BACKUP PAYLOAD SIZE', JSON.stringify(data).length);
-    console.log('BACKUP FIRST DDT', data.ddt[0]);
-
-    // Mai sovrascrivere un archivio popolato con una lista vuota: e' il caso
-    // di un dispositivo appena ripulito che salva prima di aver sincronizzato.
-    // Se il controllo remoto fallisce, il backup viene comunque annullato:
-    // senza rete il POST non andrebbe a buon fine in ogni caso.
-    if (ddt.length === 0) {
-      const remoteRes = await fetch(BACKUP_URL + '?t=' + Date.now());
-      const remote = await remoteRes.json();
-
-      if (Array.isArray(remote?.ddt) && remote.ddt.length > 0) {
-        console.log('Backup bloccato: lista locale vuota, archivio remoto popolato');
-        return;
-      }
-    }
-
-    if (!skipRemoteSafetyCheck) {
-      const remoteRes = await fetch(BACKUP_URL + '?t=' + Date.now());
-      const remote = await remoteRes.json();
-
-      const remoteDate = remote?.updatedAt ? new Date(remote.updatedAt) : null;
-      const localDate = new Date(localUpdatedAt);
-      const remoteIsNewer = remoteDate instanceof Date
-        && !Number.isNaN(remoteDate.getTime())
-        && remoteDate > localDate;
-
-      if (remoteIsNewer) {
-        console.log('Backup bloccato: remoto più recente');
-        return;
-      }
-    }
-
-    fetch(BACKUP_URL, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-      .then((res) => res.json())
-      .then((json) => {
-        console.log('BACKUP OK', json);
-      })
-      .catch((err) => {
-        console.error('BACKUP ERROR', err);
-      });
-  } catch (err) {
-    console.error('BACKUP ERROR', err);
   }
 }
 
@@ -535,30 +463,36 @@ function mergeDDTLists(localDDT = [], remoteDDT = []) {
 
 async function syncDDT() {
   if (!navigator.onLine) return;
+  if (!STORAGE.sessioneAttiva()) return;
   if (syncInProgress) return;
   syncInProgress = true;
 
   try {
-    console.log("SYNC START");
+    console.log('SYNC START');
+
+    // Prima le operazioni rimaste in coda (salvataggi/eliminazioni offline),
+    // poi la lettura degli archivi remoti dell'utente.
+    await STORAGE.flushQueue();
+
     const localDDT = await getAllDDT();
-    const res = await fetch(BACKUP_URL + "?t=" + Date.now());
-    const remote = await res.json();
-    console.log("REMOTE:", remote);
+    const remoteDDT = await STORAGE.leggiRemoti();
+    console.log('REMOTE DDT:', remoteDDT.length, '| LOCAL DDT:', localDDT.length);
 
-    const remoteDDT = Array.isArray(remote?.ddt) ? remote.ddt : [];
-    console.log("REMOTE DDT:", remoteDDT.length);
-    console.log("LOCAL DDT:", localDDT.length);
+    // A coda vuota il server e' autorevole: cio' che non esiste piu' sul
+    // backend (eliminato da un altro dispositivo) sparisce anche in locale.
+    // Con operazioni ancora in coda, o con un remoto sospettosamente vuoto,
+    // si torna al merge conservativo.
+    const serverAutorevole = STORAGE.codaVuota()
+      && !(remoteDDT.length === 0 && localDDT.length > 0);
 
-    const finalDDT = mergeDDTLists(localDDT, remoteDDT);
+    const finalDDT = serverAutorevole ? remoteDDT : mergeDDTLists(localDDT, remoteDDT);
 
-    // salva locale
     await saveAllDDT(finalDDT);
-    // aggiorna contatori
     await updateCountersFromDDT(finalDDT);
     render(finalDDT);
-    console.log("SYNC OK");
-  } catch(err) {
-    console.error("SYNC ERROR", err);
+    console.log('SYNC OK');
+  } catch (err) {
+    console.error('SYNC ERROR', err);
   } finally {
     syncInProgress = false;
   }
@@ -834,6 +768,7 @@ function render(ddts) {
       if (index < 0 || index >= updated.length) return;
 
       // eliminazione reale
+      const rimosso = updated[index];
       updated.splice(index, 1);
 
       saveDDTs(updated);
@@ -845,7 +780,10 @@ function render(ddts) {
 
       console.log('DDT ELIMINATO DEFINITIVAMENTE');
 
-      backupToDrive({ skipRemoteSafetyCheck: true, ddt: updated });
+      const esito = await STORAGE.remove(rimosso);
+      if (!esito.inviato) {
+        showSaveToast('Eliminato sul dispositivo: la rimozione remota è in coda', 'success');
+      }
     });
 
     buttons.append(editButton, printButton, deleteButton);
@@ -888,6 +826,7 @@ form.addEventListener('submit', async (event) => {
     const ddt = {
       id: existing?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ddt-${Date.now()}`),
       numero: existing?.numero || '',
+      serie: existing?.serie || STORAGE.serieAttiva() || 'MS',
       data: dataInput.value,
       cliente: {
         riga1: clienteRiga1Input.value.trim(),
@@ -915,16 +854,19 @@ form.addEventListener('submit', async (event) => {
     }
 
     saveDDTs(current);
-    console.log('SALVATAGGIO DDT');
-    console.log('CURRENT DDT', current);
-    backupToDrive({ skipRemoteSafetyCheck: true, ddt: current });
+    console.log('SALVATAGGIO DDT', ddt.numero);
+    const esito = await STORAGE.upsert(ddt);
     render(current.sort((a, b) => {
       const numA = parseInt((a.numero || '').replace(/\D/g, '') || '0');
       const numB = parseInt((b.numero || '').replace(/\D/g, '') || '0');
       return numB - numA;
     }));
 
-    showSaveToast('DDT salvato correttamente', 'success');
+    if (esito.inviato) {
+      showSaveToast('DDT salvato correttamente', 'success');
+    } else {
+      showSaveToast('DDT salvato sul dispositivo: invio in coda', 'success');
+    }
   } catch (error) {
     console.error('Errore durante il salvataggio DDT:', error);
     showSaveToast('Errore durante il salvataggio', 'error');
@@ -993,11 +935,248 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Login e sessione
+// ---------------------------------------------------------------------------
+
+const loginScreen = document.getElementById('login-screen');
+const loginBox = document.getElementById('login-box');
+const loginCodiceInput = document.getElementById('login-codice');
+const loginPinInput = document.getElementById('login-pin');
+const loginButton = document.getElementById('login-btn');
+const loginErrore = document.getElementById('login-errore');
+const cambioPinBox = document.getElementById('cambio-pin-box');
+const pinAttualeLabel = document.getElementById('pin-attuale-label');
+const pinAttualeInput = document.getElementById('pin-attuale');
+const nuovoPinInput = document.getElementById('nuovo-pin');
+const nuovoPin2Input = document.getElementById('nuovo-pin2');
+const cambioPinButton = document.getElementById('cambio-pin-btn');
+const cambioPinAnnulla = document.getElementById('cambio-pin-annulla');
+const cambioPinErrore = document.getElementById('cambio-pin-errore');
+const serieBox = document.getElementById('serie-box');
+const serieOpzioni = document.getElementById('serie-opzioni');
+const userBar = document.getElementById('user-bar');
+const userInfo = document.getElementById('user-info');
+const serieSelect = document.getElementById('serie-select');
+const cambiaPinBarButton = document.getElementById('cambia-pin-bar-btn');
+const logoutButton = document.getElementById('logout-btn');
+
+const LAST_USER_KEY = 'ddtLastUser';
+let pinDaCambiare = null; // PIN iniziale da sostituire obbligatoriamente
+
+const ERRORI_LOGIN = {
+  credenziali_mancanti: 'Inserisci codice e PIN',
+  credenziali_non_valide: 'Codice o PIN errati',
+  pin_non_assegnato: 'PIN non ancora assegnato: contatta l\'amministrazione',
+};
+
+function mostraSoloBox(box) {
+  [loginBox, cambioPinBox, serieBox].forEach((b) => { if (b) b.hidden = b !== box; });
+  if (loginScreen) loginScreen.hidden = !box;
+  document.body.classList.toggle('login-attivo', !!box);
+}
+
+function mostraLogin() {
+  if (userBar) userBar.hidden = true;
+  if (loginErrore) loginErrore.hidden = true;
+  if (loginPinInput) loginPinInput.value = '';
+  mostraSoloBox(loginBox);
+  const ultimo = localStorage.getItem(LAST_USER_KEY);
+  if (ultimo && loginCodiceInput) loginCodiceInput.value = ultimo;
+}
+
+function aggiornaBarraUtente() {
+  const utente = STORAGE.utente();
+  if (!utente || !userBar) return;
+
+  userBar.hidden = false;
+  userInfo.textContent = `${utente.nome} (${utente.codice})`;
+
+  if (utente.serie.length > 1) {
+    serieSelect.hidden = false;
+    serieSelect.innerHTML = '';
+    utente.serie.forEach((s) => {
+      const opzione = document.createElement('option');
+      opzione.value = s;
+      opzione.textContent = `Serie ${s}`;
+      opzione.selected = s === STORAGE.serieAttiva();
+      serieSelect.appendChild(opzione);
+    });
+  } else {
+    serieSelect.hidden = true;
+  }
+}
+
+function avviaApp() {
+  mostraSoloBox(null);
+  aggiornaBarraUtente();
+  render(getDDTs());
+  syncDDT();
+}
+
+function dopoAutenticazione() {
+  const utente = STORAGE.utente();
+  if (utente.serie.length > 1 && !STORAGE.serieAttiva()) {
+    serieOpzioni.innerHTML = '';
+    utente.serie.forEach((s) => {
+      const bottone = document.createElement('button');
+      bottone.type = 'button';
+      bottone.className = 'serie-scelta';
+      const mittente = STORAGE.mittentePer(s);
+      bottone.innerHTML = `<strong>Serie ${s}</strong><span>${mittente[0] || ''}</span>`;
+      bottone.addEventListener('click', () => {
+        STORAGE.setSerieAttiva(s);
+        avviaApp();
+      });
+      serieOpzioni.appendChild(bottone);
+    });
+    mostraSoloBox(serieBox);
+  } else {
+    avviaApp();
+  }
+}
+
+function apriCambioPin(obbligatorio) {
+  if (cambioPinErrore) cambioPinErrore.hidden = true;
+  nuovoPinInput.value = '';
+  nuovoPin2Input.value = '';
+
+  // Nel cambio obbligatorio il PIN attuale e' quello appena digitato al login.
+  pinAttualeLabel.hidden = obbligatorio;
+  pinAttualeInput.value = obbligatorio ? pinDaCambiare : '';
+  cambioPinAnnulla.hidden = obbligatorio;
+
+  mostraSoloBox(cambioPinBox);
+}
+
+async function eseguiLogin() {
+  const codice = (loginCodiceInput.value || '').trim().toUpperCase();
+  const pin = loginPinInput.value || '';
+  loginErrore.hidden = true;
+  loginButton.disabled = true;
+
+  try {
+    const esito = await STORAGE.login(codice, pin);
+
+    if (!esito.ok) {
+      loginErrore.textContent = ERRORI_LOGIN[esito.errore] || 'Accesso non riuscito';
+      loginErrore.hidden = false;
+      return;
+    }
+
+    // Cambio utente sul dispositivo: i dati locali dell'utente precedente
+    // non devono restare visibili al nuovo.
+    const precedente = localStorage.getItem(LAST_USER_KEY);
+    if (precedente && precedente !== codice) {
+      saveDDTs([]);
+      localStorage.removeItem('ddtOpsPending');
+      resetFormState();
+    }
+    localStorage.setItem(LAST_USER_KEY, codice);
+
+    if (pin === `${codice}1234`) {
+      pinDaCambiare = pin;
+      apriCambioPin(true);
+    } else {
+      dopoAutenticazione();
+    }
+  } catch (err) {
+    console.error('Errore di login:', err);
+    loginErrore.textContent = 'Connessione assente: il primo accesso richiede la rete';
+    loginErrore.hidden = false;
+  } finally {
+    loginButton.disabled = false;
+  }
+}
+
+async function eseguiCambioPin() {
+  const attuale = pinAttualeInput.value || '';
+  const nuovo = nuovoPinInput.value || '';
+  const conferma = nuovoPin2Input.value || '';
+  cambioPinErrore.hidden = true;
+
+  if (nuovo.length < 4) {
+    cambioPinErrore.textContent = 'Il nuovo PIN deve avere almeno 4 caratteri';
+    cambioPinErrore.hidden = false;
+    return;
+  }
+  if (nuovo !== conferma) {
+    cambioPinErrore.textContent = 'I due PIN non coincidono';
+    cambioPinErrore.hidden = false;
+    return;
+  }
+  const codice = STORAGE.utente()?.codice || '';
+  if (nuovo === `${codice}1234`) {
+    cambioPinErrore.textContent = 'Scegli un PIN diverso da quello iniziale';
+    cambioPinErrore.hidden = false;
+    return;
+  }
+
+  cambioPinButton.disabled = true;
+  try {
+    const esito = await STORAGE.cambiaPin(attuale, nuovo);
+
+    if (!esito.ok) {
+      cambioPinErrore.textContent = esito.errore === 'pin_attuale_errato'
+        ? 'PIN attuale errato'
+        : 'Cambio PIN non riuscito';
+      cambioPinErrore.hidden = false;
+      return;
+    }
+
+    pinDaCambiare = null;
+    dopoAutenticazione();
+    showSaveToast('PIN aggiornato', 'success');
+  } catch (err) {
+    console.error('Errore cambio PIN:', err);
+    cambioPinErrore.textContent = 'Connessione assente: riprova con la rete attiva';
+    cambioPinErrore.hidden = false;
+  } finally {
+    cambioPinButton.disabled = false;
+  }
+}
+
+if (loginButton) loginButton.addEventListener('click', eseguiLogin);
+if (loginPinInput) loginPinInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') eseguiLogin(); });
+if (cambioPinButton) cambioPinButton.addEventListener('click', eseguiCambioPin);
+if (cambioPinAnnulla) cambioPinAnnulla.addEventListener('click', () => mostraSoloBox(null));
+if (cambiaPinBarButton) cambiaPinBarButton.addEventListener('click', () => apriCambioPin(false));
+
+if (serieSelect) {
+  serieSelect.addEventListener('change', () => {
+    STORAGE.setSerieAttiva(serieSelect.value);
+    render(getDDTs());
+  });
+}
+
+if (logoutButton) {
+  logoutButton.addEventListener('click', async () => {
+    await STORAGE.logout();
+    mostraLogin();
+  });
+}
+
+window.addEventListener('ddt-sessione-scaduta', () => {
+  showSaveToast('Sessione scaduta: accedi di nuovo', 'error');
+  mostraLogin();
+});
+
+// ---------------------------------------------------------------------------
+// Avvio
+// ---------------------------------------------------------------------------
+
 updateFirmaPreview();
 resetFormState();
 
-(async () => {
-  await syncDDT();
-})();
+if (STORAGE.sessioneAttiva()) {
+  if (STORAGE.utente().serie.length > 1 && !STORAGE.serieAttiva()) {
+    dopoAutenticazione();
+  } else {
+    avviaApp();
+  }
+} else {
+  mostraLogin();
+}
+
 setInterval(syncDDT, 300000);
 window.addEventListener('online', syncDDT);

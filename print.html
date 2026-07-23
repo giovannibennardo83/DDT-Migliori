@@ -139,7 +139,9 @@
         field('numero').textContent = ddt.numero || '';
         field('data').textContent = formatDisplayDate(ddt.data);
         field('cliente').textContent = [cliente.riga1, cliente.riga2, cliente.riga3].filter(Boolean).join('\n');
-        field('mittente').textContent = MITTENTE_FISSO;
+        // Il mittente arriva dal documento (dipende dalla serie); il blocco
+        // storico resta come riserva per i payload piu' vecchi.
+        field('mittente').textContent = String(ddt.mittente || '').trim() || MITTENTE_FISSO;
         field('causale').textContent = ddt.causale_trasporto || '';
         field('iniziali').textContent = ddt.iniziali_paziente || '';
         field('cartella').textContent = ddt.cartella_clinica || '';

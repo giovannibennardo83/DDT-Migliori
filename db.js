@@ -50,6 +50,7 @@ function normalizeDDTStorage(ddt) {
   const normalized = {
     id: String(ddt?.id ?? generateDDTId()),
     numero: String(ddt?.numero ?? '').trim(),
+    serie: String(ddt?.serie ?? 'MS').trim().toUpperCase() || 'MS',
     data: String(ddt?.data ?? ''),
     cliente: normalizeCliente(ddt?.cliente, ddt?.destinatario),
     causale_trasporto: String(ddt?.causale_trasporto ?? '').trim(),
@@ -120,12 +121,19 @@ function getYearCode(dateString) {
 async function getNextDDTNumber(dateString) {
   const anno = getYearCode(dateString);
 
+  const utente = STORAGE.utente();
+  if (!utente) throw new Error('Numerazione non disponibile senza sessione');
+  const serie = STORAGE.serieAttiva() || 'MS';
+
   const all = await getAllDDT();
 
   let max = 0;
 
+  // Il progressivo e' locale all'archivio: si contano solo i DDT
+  // della serie attiva, per l'anno del documento.
   all.forEach(d => {
     if (!d.numero) return;
+    if ((d.serie || 'MS') !== serie) return;
 
     const dAnno = d.numero.substring(0, 2);
     const progressivo = parseInt(d.numero.substring(2, 5), 10);
@@ -144,7 +152,7 @@ async function getNextDDTNumber(dateString) {
   updated[anno] = next;
   await saveCounters(updated);
 
-  return `${anno}${String(next).padStart(3, '0')}${APP_CONFIG.agent.code}`;
+  return `${anno}${String(next).padStart(3, '0')}${utente.codice}`;
 }
   
 async function getCounters() {

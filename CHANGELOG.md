@@ -12,6 +12,16 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
 ### Aggiunto
 - Struttura documentale del progetto: `README.md`, `CLAUDE.md`, `ROADMAP.md`, `CHANGELOG.md`
   e cartella `docs/` con architettura, modello dati, API e utenti.
+- Piattaforma multiutente: login con codice agente e PIN (cambio obbligatorio del PIN
+  iniziale, cambio volontario dalla barra utente, logout), Storage Service (`storage.js`)
+  come unico punto di contatto col backend, scritture per singolo documento (upsert/delete)
+  al posto della sovrascrittura integrale dell'archivio, coda offline con invio automatico
+  al ritorno della rete, selezione della serie documentale per gli utenti abilitati a più
+  serie, mittente di stampa derivato dalla serie del documento. Backend Apps Script v2
+  multiarchivio (`<SERIE>_<CODICE>_<ANNO>.json`) con autenticazione, autorizzazione per
+  archivio, lock sulle scritture e ruolo admin in sola lettura.
+- Campo persistito `serie` sui DDT (default `MS`); numerazione calcolata per serie attiva
+  con codice agente dalla sessione.
 - `config.js` con la configurazione dell'applicazione (`APP_CONFIG`): il codice agente usato
   nella numerazione non è più hardcoded in `db.js` ma letto dalla configurazione. Formato del
   numero invariato. Cache del Service Worker a `ddt-cache-v7` per includere il nuovo file.

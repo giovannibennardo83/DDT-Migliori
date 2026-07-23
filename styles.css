@@ -325,3 +325,100 @@ li {
     max-width: 100%;
   }
 }
+
+/* --- Login e sessione --- */
+
+.login-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/* display esplicito nelle regole sopra: l'attributo hidden va riaffermato,
+   altrimenti il foglio di stile lo sovrasta e l'overlay resta visibile. */
+.login-screen[hidden],
+.user-bar[hidden] { display: none; }
+
+body.login-attivo { overflow: hidden; }
+
+.login-box {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 35%);
+}
+
+.login-box h2 { margin: 0 0 0.25rem; }
+
+.login-sottotitolo { margin: 0 0 1rem; color: #475569; font-size: 0.9rem; }
+
+.login-box button {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.65rem;
+  border: 0;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.login-box button.secondary { background: #e2e8f0; color: #0f172a; font-weight: 600; }
+
+.login-errore { margin: 0.75rem 0 0; color: #b91c1c; font-weight: 600; font-size: 0.9rem; }
+
+#serie-opzioni { display: grid; gap: 0.6rem; }
+
+.serie-scelta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: flex-start;
+  text-align: left;
+  padding: 0.75rem !important;
+}
+
+.serie-scelta span { font-weight: 400; font-size: 0.85rem; opacity: 0.85; }
+
+.user-bar {
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+
+.user-bar #user-info { font-weight: 600; margin-right: auto; }
+
+.user-bar select {
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #fff;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.user-bar button {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #fff;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.user-bar button:hover { background: #334155; }

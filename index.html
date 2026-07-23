@@ -9,9 +9,58 @@
     <title>DDT Manager</title>
   </head>
   <body>
+    <div id="login-screen" class="login-screen" hidden>
+      <div id="login-box" class="login-box">
+        <h2>DDT Manager</h2>
+        <p class="login-sottotitolo">Accedi con il tuo codice agente</p>
+        <label>
+          Codice agente
+          <input type="text" id="login-codice" autocomplete="username" autocapitalize="characters" spellcheck="false" />
+        </label>
+        <label>
+          PIN
+          <input type="password" id="login-pin" autocomplete="current-password" inputmode="text" />
+        </label>
+        <button type="button" id="login-btn">Entra</button>
+        <p id="login-errore" class="login-errore" hidden></p>
+      </div>
+
+      <div id="cambio-pin-box" class="login-box" hidden>
+        <h2>Imposta un nuovo PIN</h2>
+        <p class="login-sottotitolo">Il PIN iniziale va sostituito con uno personale</p>
+        <label id="pin-attuale-label">
+          PIN attuale
+          <input type="password" id="pin-attuale" autocomplete="current-password" />
+        </label>
+        <label>
+          Nuovo PIN
+          <input type="password" id="nuovo-pin" autocomplete="new-password" />
+        </label>
+        <label>
+          Conferma nuovo PIN
+          <input type="password" id="nuovo-pin2" autocomplete="new-password" />
+        </label>
+        <button type="button" id="cambio-pin-btn">Salva PIN</button>
+        <button type="button" id="cambio-pin-annulla" class="secondary" hidden>Annulla</button>
+        <p id="cambio-pin-errore" class="login-errore" hidden></p>
+      </div>
+
+      <div id="serie-box" class="login-box" hidden>
+        <h2>Seleziona il mittente</h2>
+        <p class="login-sottotitolo">I documenti verranno emessi per questa serie</p>
+        <div id="serie-opzioni"></div>
+      </div>
+    </div>
+
     <header>
       <h1>DDT Manager</h1>
       <p>Crea, modifica e stampa Documenti di Trasporto</p>
+      <div id="user-bar" class="user-bar" hidden>
+        <span id="user-info"></span>
+        <select id="serie-select" hidden></select>
+        <button type="button" id="cambia-pin-bar-btn" class="secondary">Cambia PIN</button>
+        <button type="button" id="logout-btn" class="secondary">Esci</button>
+      </div>
     </header>
 
     <main>
@@ -148,6 +197,7 @@
 
     <p id="save-status" class="save-status" aria-live="polite"></p>
     <script src="config.js"></script>
+    <script src="storage.js"></script>
     <script src="db.js"></script>
     <script src="app.js"></script>
   </body>
