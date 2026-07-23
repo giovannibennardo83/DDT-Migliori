@@ -149,8 +149,28 @@ const STORAGE = (function () {
         utente: esito.utente,
         serieInfo: esito.serieInfo || {},
         serieAttiva: esito.utente.serie.length === 1 ? esito.utente.serie[0] : null,
+        firma: esito.firma || null,
       };
       localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      return esito;
+    },
+
+    firmaMittente() {
+      return session ? session.firma || null : null;
+    },
+
+    // Salva (o rimuove, con immagine vuota) la firma mittente dell'agente.
+    async salvaFirma(immagine) {
+      if (!session) return { ok: false, errore: 'sessione_non_valida' };
+
+      const esito = await chiama({ azione: 'salvaFirma', token: session.token, immagine: immagine || '' });
+
+      if (esito.ok) {
+        session.firma = immagine || null;
+        localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      }
+      if (!esito.ok && esito.errore === 'sessione_non_valida') sessioneScaduta();
+
       return esito;
     },
 

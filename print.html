@@ -61,7 +61,7 @@
 
           <div class="sign">
             <div class="firma-mittente-block">
-              <img class="firma-mittente-img" src="assets/firma_gio.png" alt="Firma mittente" onerror="this.style.display='none'" />
+              <img data-field="firmaMittente" class="firma-mittente-img" alt="Firma mittente" hidden />
               <div>FIRMA MITTENTE ______________________</div>
             </div>
             <div class="firma-destinatario-block">
@@ -142,6 +142,16 @@
         // Il mittente arriva dal documento (dipende dalla serie); il blocco
         // storico resta come riserva per i payload piu' vecchi.
         field('mittente').textContent = String(ddt.mittente || '').trim() || MITTENTE_FISSO;
+
+        // La firma mittente e' quella personale dell'agente che stampa: se
+        // manca, resta la sola riga da firmare a penna. Nessuna firma di
+        // riserva: una firma altrui su un DDT non e' mai accettabile.
+        const firmaMittente = String(ddt.firmaMittente || '').trim();
+        if (firmaMittente) {
+          const img = field('firmaMittente');
+          img.src = firmaMittente;
+          img.hidden = false;
+        }
         field('causale').textContent = ddt.causale_trasporto || '';
         field('iniziali').textContent = ddt.iniziali_paziente || '';
         field('cartella').textContent = ddt.cartella_clinica || '';

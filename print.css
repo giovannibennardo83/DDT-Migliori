@@ -47,15 +47,14 @@ td.description { white-space: normal; word-break: break-word; }
 .firma-destinatario-container[aria-hidden='true'] { display: none; }
 .firma-mittente-img,
 .firma-destinatario-img {
-  width: 200px;
+  max-width: 200px;
+  max-height: 48px;
+  width: auto;
   height: auto;
-  max-width: 100%;
   object-fit: contain;
   background: transparent;
   display: block;
 }
 
-.firma-destinatario-img {
-  max-height: 48px;
-  width: auto;
-}
+/* display esplicito sopra: l'attributo hidden va riaffermato. */
+.firma-mittente-img[hidden] { display: none; }

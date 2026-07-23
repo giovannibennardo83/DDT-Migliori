@@ -50,6 +50,16 @@
         <p class="login-sottotitolo">I documenti verranno emessi per questa serie</p>
         <div id="serie-opzioni"></div>
       </div>
+
+      <div id="firma-step-box" class="login-box" hidden>
+        <h2>La tua firma</h2>
+        <p class="login-sottotitolo">
+          Comparirà come firma mittente sui tuoi DDT stampati.
+          Puoi disegnarla ora o in seguito dal pulsante "La mia firma".
+        </p>
+        <button type="button" id="firma-step-disegna">Disegna la firma</button>
+        <button type="button" id="firma-step-salta" class="secondary">Più tardi</button>
+      </div>
     </div>
 
     <header>
@@ -58,6 +68,7 @@
       <div id="user-bar" class="user-bar" hidden>
         <span id="user-info"></span>
         <select id="serie-select" hidden></select>
+        <button type="button" id="firma-mittente-bar-btn" class="secondary">La mia firma</button>
         <button type="button" id="cambia-pin-bar-btn" class="secondary">Cambia PIN</button>
         <button type="button" id="logout-btn" class="secondary">Esci</button>
       </div>

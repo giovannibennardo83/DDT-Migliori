@@ -43,6 +43,21 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
   all'elenco righe: le eccedenti non comparivano sul documento stampato, senza alcuna
   segnalazione all'utente. I dati salvati non erano interessati.
 
+### Aggiunto (firma mittente per agente)
+- Ogni agente ha la **propria firma mittente**: disegnata nell'app (passo proposto al primo
+  accesso, saltabile; modificabile in ogni momento da "La mia firma"), salvata sul backend in
+  `Firme/<CODICE>.txt` e restituita al login. La stampa usa la firma dell'agente della
+  sessione; se assente resta la riga da firmare a penna. **Rimossa la firma cablata**
+  `assets/firma_gio.png` dalla stampa: nessun documento esce più con la firma di un altro.
+- Ritaglio automatico delle firme al salvataggio (mittente e destinatario): l'immagine è
+  ridotta al riquadro effettivamente disegnato; un canvas vuoto viene rifiutato.
+- Indicatori di attesa: "Salvataggio firma in corso…" e, all'apertura dell'app,
+  "Caricamento archivio da Google Drive…" (le sync periodiche restano silenziose).
+
+### Corretto (stampa firme)
+- Le firme in stampa sono vincolate a **max 200×48 px** con proporzioni conservate: una firma
+  disegnata alta non sfonda più la pagina A4 su due pagine.
+
 ### Modificato
 - Archivio più leggibile: di default mostra gli **ultimi 5** DDT, con chip `Ultimi 5 ·
   Ultimi 30 · Tutti` (scelta ricordata per agente), **ricerca live** su numero e cliente che

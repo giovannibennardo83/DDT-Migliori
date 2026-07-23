@@ -62,6 +62,8 @@ function setSavingState(saving) {
 }
 
 
+// type: 'success' | 'error' (si chiudono da soli) | 'pending' (spinner, resta
+// visibile finche' non arriva un altro toast o hideSaveToast()).
 function showSaveToast(message, type = 'success') {
   if (!saveStatus) return;
 
@@ -70,8 +72,16 @@ function showSaveToast(message, type = 'success') {
     saveStatusTimeout = null;
   }
 
+  saveStatus.classList.remove('is-success', 'is-error', 'is-pending');
+
+  if (type === 'pending') {
+    saveStatus.innerHTML = '<span class="save-spinner" aria-hidden="true"></span>';
+    saveStatus.append(message);
+    saveStatus.classList.add('is-pending');
+    return;
+  }
+
   saveStatus.textContent = message;
-  saveStatus.classList.remove('is-success', 'is-error');
   saveStatus.classList.add(type === 'error' ? 'is-error' : 'is-success');
 
   saveStatusTimeout = setTimeout(() => {
@@ -79,6 +89,16 @@ function showSaveToast(message, type = 'success') {
     saveStatus.classList.remove('is-success', 'is-error');
     saveStatusTimeout = null;
   }, 3000);
+}
+
+function hideSaveToast() {
+  if (!saveStatus) return;
+  if (saveStatusTimeout) {
+    clearTimeout(saveStatusTimeout);
+    saveStatusTimeout = null;
+  }
+  saveStatus.textContent = '';
+  saveStatus.classList.remove('is-success', 'is-error', 'is-pending');
 }
 
 
@@ -120,8 +140,19 @@ function resizeFirmaCanvas() {
   clearFirmaCanvas();
 }
 
-function openFirmaModal() {
+// La modale firma serve due scopi: la firma del destinatario sul documento
+// corrente e la firma mittente personale dell'agente (salvata sul backend).
+let firmaModalMode = 'destinatario';
+
+function openFirmaModal(mode = 'destinatario') {
   if (!firmaModal) return;
+  firmaModalMode = mode;
+
+  const titolo = document.getElementById('firma-modal-title');
+  if (titolo) {
+    titolo.textContent = mode === 'mittente' ? 'La mia firma (mittente)' : 'Firma destinatario';
+  }
+
   firmaModal.hidden = false;
   resizeFirmaCanvas();
 }
@@ -204,12 +235,94 @@ function updateFirmaPreview() {
   firmaPreviewWrapper.hidden = false;
 }
 
+// Ritaglia il canvas al riquadro effettivamente disegnato (pixel con alpha),
+// con un piccolo margine. Restituisce null se il canvas e' vuoto. Senza
+// ritaglio una firma tracciata in alto produce un'immagine altissima che in
+// stampa sfonda la pagina A4.
+function ritagliaFirmaCanvas(canvas) {
+  const ctx = canvas.getContext('2d');
+  const { width, height } = canvas;
+  if (!width || !height) return null;
+
+  const pixels = ctx.getImageData(0, 0, width, height).data;
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (pixels[(y * width + x) * 4 + 3] > 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < 0) return null; // nessun tratto
+
+  const margine = 8;
+  minX = Math.max(0, minX - margine);
+  minY = Math.max(0, minY - margine);
+  maxX = Math.min(width - 1, maxX + margine);
+  maxY = Math.min(height - 1, maxY + margine);
+
+  const ritaglio = document.createElement('canvas');
+  ritaglio.width = maxX - minX + 1;
+  ritaglio.height = maxY - minY + 1;
+  ritaglio.getContext('2d').drawImage(
+    canvas, minX, minY, ritaglio.width, ritaglio.height, 0, 0, ritaglio.width, ritaglio.height);
+
+  return ritaglio.toDataURL('image/png');
+}
+
 function saveFirmaPlaceholder() {
   if (!firmaCanvas) return;
-  temporaryFirmaImage = firmaCanvas.toDataURL('image/png');
+
+  const immagine = ritagliaFirmaCanvas(firmaCanvas);
+  if (!immagine) {
+    showSaveToast('Disegna la firma prima di salvare', 'error');
+    return;
+  }
+
+  if (firmaModalMode === 'mittente') {
+    salvaFirmaMittente(immagine);
+    return;
+  }
+
+  temporaryFirmaImage = immagine;
   updateFirmaPreview();
   closeFirmaModal();
   showSaveToast('Firma acquisita', 'success');
+}
+
+// Callback da eseguire dopo il passo firma del primo accesso.
+let dopoPassoFirma = null;
+
+async function salvaFirmaMittente(immagine) {
+  showSaveToast('Salvataggio firma in corso…', 'pending');
+
+  try {
+    const esito = await STORAGE.salvaFirma(immagine);
+
+    if (!esito.ok) {
+      showSaveToast(esito.errore === 'firma_troppo_grande'
+        ? 'Firma troppo pesante: riprova con un tratto più semplice'
+        : 'Salvataggio firma non riuscito', 'error');
+      return;
+    }
+
+    closeFirmaModal();
+    showSaveToast('Firma salvata', 'success');
+
+    if (dopoPassoFirma) {
+      const prosegui = dopoPassoFirma;
+      dopoPassoFirma = null;
+      prosegui();
+    }
+  } catch (err) {
+    console.error('Errore salvataggio firma:', err);
+    showSaveToast('Serve la connessione per salvare la firma', 'error');
+  }
 }
 
 function createEmptyRiga() {
@@ -406,18 +519,23 @@ function loadInForm(ddt, index) {
 
 function saveAndPrint(ddt) {
   const mittente = STORAGE.mittentePer(ddt.serie || 'MS').join('\n');
-  localStorage.setItem('printDDT', JSON.stringify({ ...ddt, mittente }));
+  const firmaMittente = STORAGE.firmaMittente();
+  localStorage.setItem('printDDT', JSON.stringify({ ...ddt, mittente, firmaMittente }));
   const printWindow = window.open('print.html', '_blank');
   if (!printWindow) {
     alert('Impossibile aprire la finestra di stampa.');
   }
 }
 
-async function syncDDT() {
+async function syncDDT(mostraAttesa = false) {
   if (!navigator.onLine) return;
   if (!STORAGE.sessioneAttiva()) return;
   if (syncInProgress) return;
   syncInProgress = true;
+
+  // L'attesa si mostra solo all'apertura dell'app; le sincronizzazioni
+  // periodiche in sottofondo restano silenziose.
+  if (mostraAttesa) showSaveToast('Caricamento archivio da Google Drive…', 'pending');
 
   try {
     console.log('SYNC START');
@@ -433,8 +551,12 @@ async function syncDDT() {
     await updateCountersFromDDT(finalDDT);
     render(finalDDT);
     console.log('SYNC OK');
+    if (mostraAttesa) hideSaveToast();
   } catch (err) {
     console.error('SYNC ERROR', err);
+    if (mostraAttesa) {
+      showSaveToast('Archivio non aggiornato: connessione assente', 'error');
+    }
   } finally {
     syncInProgress = false;
   }
@@ -975,6 +1097,10 @@ const cambioPinAnnulla = document.getElementById('cambio-pin-annulla');
 const cambioPinErrore = document.getElementById('cambio-pin-errore');
 const serieBox = document.getElementById('serie-box');
 const serieOpzioni = document.getElementById('serie-opzioni');
+const firmaStepBox = document.getElementById('firma-step-box');
+const firmaStepDisegna = document.getElementById('firma-step-disegna');
+const firmaStepSalta = document.getElementById('firma-step-salta');
+const firmaMittenteBarButton = document.getElementById('firma-mittente-bar-btn');
 const userBar = document.getElementById('user-bar');
 const userInfo = document.getElementById('user-info');
 const serieSelect = document.getElementById('serie-select');
@@ -991,7 +1117,7 @@ const ERRORI_LOGIN = {
 };
 
 function mostraSoloBox(box) {
-  [loginBox, cambioPinBox, serieBox].forEach((b) => { if (b) b.hidden = b !== box; });
+  [loginBox, cambioPinBox, serieBox, firmaStepBox].forEach((b) => { if (b) b.hidden = b !== box; });
   if (loginScreen) loginScreen.hidden = !box;
   document.body.classList.toggle('login-attivo', !!box);
 }
@@ -1032,7 +1158,7 @@ function avviaApp() {
   aggiornaBarraUtente();
   caricaVistaArchivio();
   render(getDDTs());
-  syncDDT();
+  syncDDT(true);
 }
 
 function dopoAutenticazione() {
@@ -1047,14 +1173,28 @@ function dopoAutenticazione() {
       bottone.innerHTML = `<strong>Serie ${s}</strong><span>${mittente[0] || ''}</span>`;
       bottone.addEventListener('click', () => {
         STORAGE.setSerieAttiva(s);
-        avviaApp();
+        proponiFirma(avviaApp);
       });
       serieOpzioni.appendChild(bottone);
     });
     mostraSoloBox(serieBox);
   } else {
-    avviaApp();
+    proponiFirma(avviaApp);
   }
+}
+
+// Al login, se l'agente non ha ancora una firma mittente, gliela si propone
+// una volta. Il passo e' saltabile: senza firma la stampa lascia la riga da
+// firmare a penna.
+function proponiFirma(prosegui) {
+  const utente = STORAGE.utente();
+  if (!firmaStepBox || utente.ruolo === 'admin' || STORAGE.firmaMittente()) {
+    prosegui();
+    return;
+  }
+
+  dopoPassoFirma = prosegui;
+  mostraSoloBox(firmaStepBox);
 }
 
 function apriCambioPin(obbligatorio) {
@@ -1158,6 +1298,15 @@ if (loginPinInput) loginPinInput.addEventListener('keydown', (e) => { if (e.key 
 if (cambioPinButton) cambioPinButton.addEventListener('click', eseguiCambioPin);
 if (cambioPinAnnulla) cambioPinAnnulla.addEventListener('click', () => mostraSoloBox(null));
 if (cambiaPinBarButton) cambiaPinBarButton.addEventListener('click', () => apriCambioPin(false));
+if (firmaMittenteBarButton) firmaMittenteBarButton.addEventListener('click', () => openFirmaModal('mittente'));
+if (firmaStepDisegna) firmaStepDisegna.addEventListener('click', () => openFirmaModal('mittente'));
+if (firmaStepSalta) {
+  firmaStepSalta.addEventListener('click', () => {
+    const prosegui = dopoPassoFirma;
+    dopoPassoFirma = null;
+    if (prosegui) prosegui();
+  });
+}
 
 if (serieSelect) {
   serieSelect.addEventListener('change', () => {
