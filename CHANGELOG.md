@@ -12,6 +12,9 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
 ### Aggiunto
 - Struttura documentale del progetto: `README.md`, `CLAUDE.md`, `ROADMAP.md`, `CHANGELOG.md`
   e cartella `docs/` con architettura, modello dati, API e utenti.
+- `config.js` con la configurazione dell'applicazione (`APP_CONFIG`): il codice agente usato
+  nella numerazione non è più hardcoded in `db.js` ma letto dalla configurazione. Formato del
+  numero invariato. Cache del Service Worker a `ddt-cache-v7` per includere il nuovo file.
 - Stampa multipagina: i DDT con più di 12 righe proseguono su più pagine, ciascuna copia
   integrale del modulo, con indicatore "Pagina X di Y" presente solo sui documenti multipagina.
 
@@ -40,6 +43,10 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
   lunghi e nessun limite in salvataggio.
 - Versione della cache del Service Worker incrementata a `ddt-cache-v5`, essendo cambiati
   `print.html` e `print.css`.
+- Codice agente letto dalla configurazione (M05): nuovo `config.js` con
+  `APP_CONFIG.agent` (`code`, `name`), caricato prima di `db.js`; il suffisso del numero DDT
+  non è più cablato in `getNextDDTNumber()`. Formato della numerazione invariato. Cache del
+  Service Worker incrementata a `ddt-cache-v7` con `config.js` tra gli asset.
 - Migrazione del backend su un nuovo Google Drive dedicato (M03): `BACKUP_URL` in `app.js`
   punta al nuovo deployment Apps Script, che legge e scrive
   `DDT-Migliori/Archivi/MS_GBE_2026.json`. Contratto API e comportamento invariati; storico

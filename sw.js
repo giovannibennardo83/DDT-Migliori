@@ -1,7 +1,8 @@
-const CACHE_NAME = 'ddt-cache-v6';
+const CACHE_NAME = 'ddt-cache-v7';
 const ASSETS = [
   './',
   './index.html',
+  './config.js',
   './app.js',
   './db.js',
   './styles.css',

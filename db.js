@@ -144,7 +144,7 @@ async function getNextDDTNumber(dateString) {
   updated[anno] = next;
   await saveCounters(updated);
 
-  return `${anno}${String(next).padStart(3, '0')}GBE`;
+  return `${anno}${String(next).padStart(3, '0')}${APP_CONFIG.agent.code}`;
 }
   
 async function getCounters() {
