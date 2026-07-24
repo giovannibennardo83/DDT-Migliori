@@ -3,7 +3,7 @@
 Contratti dei servizi remoti utilizzati dall'applicazione.
 
 Tutte le chiamate partono dal browser. Non esiste un livello server applicativo proprietario
-oltre alla funzione OCR e alla Web App Google Apps Script (backend v2).
+oltre alla funzione OCR e alla Web App Google Apps Script (backend v3.1).
 
 ---
 
@@ -121,10 +121,20 @@ campi vuoti, in modo che il client non debba gestire forme diverse:
 
 ---
 
-## 2. Backend dati (Apps Script v2)
+## 2. Backend dati (Apps Script v3.1)
 
 Web App Apps Script con **un solo endpoint**. Il codice vive nell'account Google del progetto,
 non in questo repository.
+
+Organizzazione su Drive:
+
+```
+DDT-Migliori/
+├── utenti.json                                  utenti, serie, mittenti, hash dei PIN
+├── Firme/<CODICE>.txt                           firma mittente dell'agente (data URL PNG)
+└── Archivio/<Nome Agente>/<SERIE>/<ANNO>/
+    └── <NUMERO>.json                            un file per ogni DDT
+```
 
 Caratteristiche trasversali:
 
@@ -132,11 +142,10 @@ Caratteristiche trasversali:
   **senza header `Content-Type`** (evita il preflight CORS, che Apps Script non gestisce);
   lato server viene letto da `e.postData.contents`.
 - La risposta è **sempre JSON** con `ok: true` oppure `ok: false` + `errore` (codice macchina).
-- La `GET` senza parametri è un ping: `{ "ok": true, "servizio": "DDT-Migliori Backend v2" }`.
-- Le scritture sono **atomiche e per singolo documento**: sotto lock globale (`LockService`)
-  il backend legge l'archivio, applica l'operazione e lo riscrive, senza stati intermedi
-  osservabili. Non esiste un'operazione che sostituisca un archivio intero, né un client può
-  inviarne uno: il body di `upsert` trasporta **un** documento, quello di `delete` un `id`.
+- La `GET` senza parametri è un ping: `{ "ok": true, "servizio": "DDT-Migliori Backend v3.1" }`.
+- Le scritture sono **atomiche e per singolo documento** (lock globale `LockService`): `upsert`
+  crea o sostituisce **un file**, `delete` ne sposta **uno** nel cestino di Drive (recuperabile
+  per 30 giorni). Non esiste alcuna operazione che tocchi più documenti insieme.
 
 ### 2.1 Autenticazione e sessioni
 
@@ -158,21 +167,27 @@ Caratteristiche trasversali:
 
 | Azione | Body (oltre ad `azione`) | Risposta `ok: true` |
 | --- | --- | --- |
-| `login` | `codice`, `pin` | `token`, `utente {codice, nome, serie[], ruolo}`, `serieInfo` (mittenti per serie) |
-| `leggi` | `token`, `serie`, `anno` (+ `codiceAgente` se admin) | `archivio {version, updatedAt, ddt[], counters[]}` |
-| `upsert` | `token`, `serie`, `anno`, `ddt {…}` | `documenti` (conteggio dopo l'operazione) |
-| `delete` | `token`, `serie`, `anno`, `id` | `documenti` |
+| `login` | `codice`, `pin` | `token`, `utente {codice, nome, serie[], ruolo}`, `serieInfo` (mittenti per serie), `firma` (data URL o `null`) |
+| `leggi` | `token`, `serie`, `anno`, `dopo?` (+ `codiceAgente` se admin) | `elenco` (tutti i numeri presenti), `documenti` (i DDT modificati), `adesso` (timestamp server) |
+| `upsert` | `token`, `serie`, `anno`, `ddt {…}` | — |
+| `delete` | `token`, `serie`, `anno`, `numero`, `id?` | — |
+| `salvaFirma` | `token`, `immagine` (data URL; vuota = rimozione) | — |
 | `cambiaPin` | `token`, `pinAttuale`, `pinNuovo` | — |
 | `logout` | `token` | — |
 
 Semantica:
 
-- **`leggi`** risolve `serie + codice (dal token) + anno` nel file
-  `<SERIE>_<CODICEAGENTE>_<ANNO>.json`; un archivio inesistente torna vuoto, senza errore.
-- **`upsert`** inserisce il documento se l'`id` non esiste, altrimenti lo sostituisce.
-  L'archivio viene creato alla prima scrittura.
-- **`delete`** rimuove il documento con quell'`id`; se non esiste risponde
+- **`leggi`** risolve la cartella `Archivio/<Nome>/<SERIE>/<ANNO>` (nome dell'agente dal token).
+  Senza `dopo` restituisce **tutti** i documenti; con `dopo` (ISO, il valore `adesso` della
+  chiamata precedente) solo i **file modificati successivamente**. `elenco` contiene sempre
+  tutti i numeri presenti: è ciò che permette al client di rilevare le eliminazioni. Una
+  cartella inesistente torna vuota, senza errore.
+- **`upsert`** scrive il file `<numero ripulito>.json` (crea le cartelle al bisogno); stesso
+  numero = sostituzione.
+- **`delete`** sposta il file nel **cestino di Drive**; se non esiste risponde
   `documento_non_trovato`.
+- **`salvaFirma`** salva la firma mittente personale (`Firme/<CODICE>.txt`); formato
+  `data:image/…`, max ~220 KB; immagine vuota la rimuove. Vietata all'admin.
 - **`cambiaPin`** richiede il PIN attuale: il solo token non basta.
 
 ### 2.3 Codici di errore
@@ -183,24 +198,29 @@ Semantica:
 | `pin_non_assegnato` | Utente esistente ma senza PIN: va assegnato dall'amministratore. |
 | `sessione_non_valida` | Token assente, scaduto o revocato: serve un nuovo login. |
 | `serie_non_abilitata` | L'utente non è abilitato alla serie richiesta. |
-| `anno_non_valido` | Anno fuori dall'intervallo 2020–2100. |
-| `admin_sola_lettura` | Tentativo di scrittura con ruolo admin. |
-| `documento_non_valido` / `id_mancante` | Payload dell'operazione incompleto. |
-| `documento_non_trovato` | Delete di un id inesistente. |
+| `anno_non_valido` | Anno fuori dall'intervallo 2000–2100. |
+| `admin_sola_lettura` | Tentativo di scrittura (documenti o firma) con ruolo admin. |
+| `codice_agente_richiesto` / `agente_non_trovato` | `leggi` admin senza (o con) codice agente non valido. |
+| `documento_non_valido` | Upsert senza `id` o `numero`. |
+| `documento_non_trovato` | Delete di un documento inesistente. |
+| `firma_non_valida` / `firma_troppo_grande` | Firma non in formato data URL o oltre il limite. |
 | `azione_sconosciuta` / `interno` | Richiesta malformata o errore server. |
 
 ### 2.4 Comportamento del client (Storage Service)
 
-- **Coda offline**: se una operazione di scrittura fallisce per rete, viene accodata in
-  `localStorage` (`ddtOpsPending`) e reinviata automaticamente al ritorno della connessione,
+- **Coda offline**: se una scrittura fallisce per rete, viene accodata in `localStorage`
+  (`ddtOpsPending_<CODICE>`) e reinviata automaticamente al ritorno della connessione,
   all'avvio e prima di ogni sincronizzazione. Un'operazione più recente sullo stesso documento
   sostituisce quella in coda.
-- **Sincronizzazione**: prima lo svuotamento della coda, poi la lettura degli archivi
-  dell'utente (ogni serie abilitata × anno corrente e precedente). A coda vuota il server è
-  autorevole (le eliminazioni fatte da altri dispositivi si propagano); con operazioni in coda,
-  o con un remoto inaspettatamente vuoto a fronte di dati locali, si applica il merge
-  conservativo.
+- **Sincronizzazione incrementale**: prima lo svuotamento della coda, poi — per ogni serie
+  abilitata × anno corrente e precedente — una `leggi` con il `dopo` memorizzato
+  (`ddtLastSync_<CODICE>`). I documenti restituiti aggiornano la copia locale; i documenti
+  locali di quella partizione **assenti dall'`elenco`** (e non in coda) vengono rimossi: le
+  eliminazioni fatte da altri dispositivi si propagano. Il nuovo `adesso` diventa il prossimo
+  `dopo`.
 - **Sessione scaduta**: le operazioni restano in coda, l'app ripresenta il login e riparte da lì.
+- All'apertura dell'app la sincronizzazione mostra un indicatore di attesa; quelle periodiche
+  (ogni 5 minuti e all'evento `online`) sono silenziose.
 
 ---
 
@@ -222,6 +242,6 @@ Semantica:
 
 - **Dashboard amministrativa** (M11): userà le azioni esistenti con utenza `ADMIN` (`leggi` con
   `codiceAgente`); non richiede nuove azioni lato backend, salvo un eventuale indice aggregato
-  se il numero di archivi rendesse costosa l'enumerazione.
+  se l'enumerazione di tutti gli agenti diventasse costosa.
 - Possibili irrobustimenti futuri: rotazione periodica del token, revoca centralizzata delle
   sessioni, audit log delle operazioni.

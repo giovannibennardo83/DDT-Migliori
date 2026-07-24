@@ -45,6 +45,11 @@ rimesse in dubbio a ogni intervento, e una proposta che le contraddice va segnal
   della ristampa.
 - **La firma del destinatario viene salvata in Base64** all'interno del documento JSON, come data
   URL PNG, non come file esterno.
+- **La firma mittente è personale di ogni agente** (disegnata nell'app, `Firme/<CODICE>.txt` sul
+  backend): **mai cablare una firma nel codice o negli asset**. Senza firma, la stampa lascia la
+  riga da firmare a penna — una firma altrui su un DDT non è mai accettabile.
+- **Le firme si ritagliano al salvataggio** (riquadro disegnato) e **in stampa non superano
+  200×48 px** a proporzioni conservate: nessuna firma può alterare l'impaginazione A4.
 - **Il numero di righe di un DDT non ha limite superiore.** La regola vale identica in
   **salvataggio** e in **stampa**: il modulo prevede 12 righe per pagina, ma un documento più lungo
   va salvato e stampato per intero, proseguendo su più pagine. Il 12 è la capienza di una pagina,
@@ -52,12 +57,16 @@ rimesse in dubbio a ogni intervento, e una proposta che le contraddice va segnal
 
 ### Archivi e identità del documento
 
-- **Ogni serie documentale possiede un archivio JSON indipendente**, nominato secondo lo standard
-  `<SERIE>_<CODICEAGENTE>_<ANNO>.json`.
-- **Numerazioni uguali appartenenti a mittenti diversi sono corrette** e non costituiscono un
-  errore da correggere.
-- **L'univocità è garantita dall'archivio JSON e non dal numero DDT.** L'identità completa di un
-  documento è `archivio + numero DDT`.
+- **Ogni DDT è un file JSON a sé** su Drive, nel percorso
+  `Archivio/<Nome Agente>/<SERIE>/<ANNO>/<NUMERO>.json` (nome file = numero ripulito, id in
+  mancanza). Non esistono archivi cumulativi da riscrivere.
+- **La sincronizzazione è incrementale**: il client chiede solo i documenti modificati
+  dall'ultima sync (`dopo`) e riconcilia le eliminazioni con l'elenco dei numeri presenti.
+- **Numerazioni uguali appartenenti a serie o agenti diversi sono corrette** e non
+  costituiscono un errore da correggere.
+- **L'univocità è garantita dal percorso e non dal numero DDT.** L'identità completa di un
+  documento è `agente + serie + anno + numero`; il campo `id` (UUID) resta la chiave tecnica
+  globale.
 - **Il mittente non compare nella numerazione**: deriva dalla serie documentale.
 - **Le scritture verso il backend sono atomiche e per singolo documento** (`upsert` / `delete`,
   sotto lock lato server): è **vietato inviare archivi completi**, e nessun client deve poterlo
@@ -92,13 +101,16 @@ rimesse in dubbio a ogni intervento, e una proposta che le contraddice va segnal
 - `package.json` copre solo l'endpoint OCR serverless (`api/ocr.js`), non il frontend.
 - **Ordine di caricamento degli script** in `index.html`: `config.js` → `storage.js` → `db.js` →
   `app.js`. Condividono lo scope globale: invertirlo rompe l'app.
-- Chiavi `localStorage` in uso: `ddtRecords` (documenti), `ddtSession` (sessione e token),
-  `ddtOpsPending` (coda offline), `ddtLastUser` (ultimo codice agente), `printDDT` (payload di
-  stampa). I contatori usano IndexedDB (database `ddt-db`, store `counters`).
+- Chiavi `localStorage`: `ddtSession` (sessione), `ddtLastUser` (ultimo codice, per il login),
+  `printDDT` (payload di stampa) sono globali; **tutte le altre sono per agente**:
+  `ddtRecords_<COD>` (documenti), `ddtOpsPending_<COD>` (coda offline), `ddtLastSync_<COD>`
+  (marcatori della sync incrementale), `ddtVistaArchivio_<COD>` (preferenza di visualizzazione).
+  I contatori usano IndexedDB (database `ddt-db`, store `counters`), condiviso tra agenti ma
+  solo come copia di sicurezza.
 - Ogni DDT passa da `normalizeDDTStorage()` in `db.js` in lettura e scrittura: **qualsiasi nuovo
   campo persistito va aggiunto lì**, altrimenti viene silenziosamente perso. Il campo `serie`
   (default `MS`) è persistito e determina archivio, numerazione e mittente di stampa.
-- Il backend è l'Apps Script v2 (repository esterno al repo: vive nell'account Google del
+- Il backend è l'Apps Script v3.1 (repository esterno al repo: vive nell'account Google del
   progetto). Contratto in [docs/API.md](docs/API.md). La configurazione utenti è in
   `utenti.json` sul Drive, non nel frontend.
 - Nel CSS, dove una regola imposta un `display` esplicito su un elemento che usa l'attributo

@@ -8,16 +8,20 @@ Struttura dei dati persistiti dall'applicazione, regole di normalizzazione e mig
 
 | Dato | Tecnologia | Chiave | Contenuto |
 | --- | --- | --- | --- |
-| DDT dell'utente | `localStorage` | `ddtRecords` | Array JSON dei documenti (cache locale degli archivi dell'utente). |
-| Sessione | `localStorage` | `ddtSession` | Token, profilo utente, mittenti per serie, serie attiva. |
-| Coda offline | `localStorage` | `ddtOpsPending` | Operazioni `upsert`/`delete` in attesa di invio. |
-| Ultimo utente | `localStorage` | `ddtLastUser` | Codice agente dell'ultimo login sul dispositivo. |
-| Contatori | IndexedDB `ddt-db` v1, store `counters` | `anno` | Ultimo progressivo per anno (copia di sicurezza). |
-| **Archivi** | Google Drive via Apps Script v2 | nome file | Un file JSON per serie + agente + anno (vedi §10). |
+| DDT dell'utente | `localStorage` | `ddtRecords_<COD>` | Array JSON dei documenti (cache locale, separata per agente). |
+| Sessione | `localStorage` | `ddtSession` | Token, profilo utente, mittenti per serie, serie attiva, firma mittente. |
+| Coda offline | `localStorage` | `ddtOpsPending_<COD>` | Operazioni `upsert`/`delete` in attesa di invio. |
+| Marcatori di sync | `localStorage` | `ddtLastSync_<COD>` | Timestamp dell'ultima sync per serie+anno (incrementale). |
+| Vista archivio | `localStorage` | `ddtVistaArchivio_<COD>` | Limite di visualizzazione scelto (5 / 30 / tutti). |
+| Ultimo utente | `localStorage` | `ddtLastUser` | Codice agente dell'ultimo login (precompilazione). |
+| Contatori | IndexedDB `ddt-db` v1, store `counters` | `anno` | Ultimo progressivo per anno (copia di sicurezza, condivisa). |
+| **Documenti** | Google Drive via Apps Script v3.1 | percorso | **Un file JSON per DDT** (vedi §10). |
+| Firme mittente | Google Drive (`DDT-Migliori/Firme/<COD>.txt`) | codice | Data URL PNG della firma dell'agente. |
 | Utenti | Google Drive (`DDT-Migliori/utenti.json`) | — | Configurazione di utenti, serie e mittenti (vedi [USERS.md](USERS.md)). |
 
-La **fonte di verità** è l'insieme degli archivi su Drive; il `localStorage` è la copia operativa
-del dispositivo, riallineata dalla sincronizzazione.
+La **fonte di verità** sono i file su Drive; il `localStorage` è la copia operativa del
+dispositivo, riallineata dalla sincronizzazione incrementale. Le chiavi locali sono separate
+per agente: sulla stessa postazione ogni utente vede solo i propri dati.
 
 ---
 
@@ -182,15 +186,15 @@ valori legacy convertiti.
 
 ## 8. Coda offline
 
-Le scritture eseguite senza rete vengono accodate in `localStorage` (`ddtOpsPending`) come
-operazioni autocontenute:
+Le scritture eseguite senza rete vengono accodate in `localStorage` (`ddtOpsPending_<COD>`)
+come operazioni autocontenute:
 
 ```json
 { "azione": "upsert", "serie": "MS", "anno": 2026, "ddt": { "id": "…", "…": "…" } }
 ```
 
 ```json
-{ "azione": "delete", "serie": "MS", "anno": 2026, "id": "…" }
+{ "azione": "delete", "serie": "MS", "anno": 2026, "numero": "26045GBE", "id": "…" }
 ```
 
 Regole:
@@ -202,25 +206,24 @@ Regole:
 
 ---
 
-## 9. Sincronizzazione e merge
+## 9. Sincronizzazione incrementale
 
-La sincronizzazione legge gli archivi remoti dell'utente (ogni serie abilitata × anno corrente e
-precedente). **A coda vuota il server è autorevole**: la lista locale viene sostituita da quella
-remota, propagando anche le eliminazioni fatte da altri dispositivi.
+Per ogni **partizione** (serie abilitata × anno corrente e precedente) il client conserva il
+timestamp dell'ultima sync (`ddtLastSync_<COD>`) e chiede al backend solo ciò che è cambiato:
 
-Con operazioni ancora in coda — o con un remoto inaspettatamente vuoto a fronte di dati locali —
-si applica il merge conservativo di `mergeDDTLists()`:
+1. `leggi {serie, anno, dopo}` restituisce i **documenti modificati** dopo `dopo`, l'**elenco
+   completo dei numeri presenti** e `adesso` (timestamp server, prossimo `dopo`).
+2. I documenti ricevuti aggiornano la copia locale (chiave `id`: sostituzione o inserimento).
+3. I documenti locali della partizione **assenti dall'elenco** — e non in coda di invio — sono
+   stati eliminati altrove: vengono rimossi anche in locale.
+4. Alla prima sync (`dopo` assente) il ciclo equivale a uno scaricamento completo.
 
-1. Chiave di identità: `id`; in mancanza, `numero`. I record senza entrambi vengono scartati.
-2. In caso di duplicato vince il record con `updatedAt` più recente, che sovrascrive l'altro
-   campo per campo.
-3. `firma_destinatario` è trattata a parte: si preserva sempre il valore non vuoto, anche se
-   proviene dal record più vecchio.
-4. Il risultato è ordinato per progressivo numerico decrescente.
+Il server è quindi autorevole partizione per partizione, e il traffico a regime è proporzionale
+alle modifiche, non alla dimensione dell'archivio.
 
 ---
 
-## 10. Archivi separati
+## 10. Un file per documento
 
 ### 10.1 Serie documentale
 
@@ -231,119 +234,95 @@ in intestazione e l'archivio su cui il documento viene registrato. Le serie in u
 La serie è un **dato di configurazione**, non una costante di codice: aggiungerne una non deve
 comportare modifiche al modello dati.
 
-### 10.2 Nomenclatura degli archivi
+### 10.2 Percorso e nome dei file
 
-Standard definitivo:
+Ogni DDT è un file JSON a sé, nel percorso:
 
 ```
-<SERIE>_<CODICEAGENTE>_<ANNO>.json
+DDT-Migliori/Archivio/<Nome Agente>/<SERIE>/<ANNO>/<NUMERO>.json
 ```
-
-| Segmento | Contenuto |
-| --- | --- |
-| `SERIE` | Sigla della serie documentale (`MS`, `PM`). |
-| `CODICEAGENTE` | Codice agente assegnato all'utente (2–3 caratteri). |
-| `ANNO` | Anno a 4 cifre. |
 
 Esempi:
 
 ```
-MS_GBE_2027.json
-MS_MRU_2027.json
-PM_MRU_2027.json
-PM_SS_2027.json
+Archivio/Giovanni Bennardo/MS/2026/26045GBE.json
+Archivio/Maurizio Russo/MS/2026/26007MRU.json
+Archivio/Maurizio Russo/PM/2026/26002MRU.json
 ```
 
-Il nome va interpretato **per posizione**, separando sui due underscore. Non va cercato per
-sottostringa: il codice agente può coincidere con una sigla di serie (`MS_MS_2027.json` è un nome
-valido, vedi [USERS.md](USERS.md#2-utenti-abilitati)).
+| Livello | Contenuto |
+| --- | --- |
+| `Nome Agente` | Cartella con il nome esteso dell'utente (`utenti.json` → `nome`). |
+| `SERIE` | Sigla della serie documentale (`MS`, `PM`). |
+| `ANNO` | Anno a 4 cifre (dalla **data del documento**). |
+| `NUMERO.json` | Numero del DDT ripulito (`[A-Za-z0-9_-]`); l'`id` in mancanza. |
 
-### 10.3 Struttura di un archivio
+Le cartelle nascono alla prima scrittura. La struttura è leggibile a occhio nudo su Drive:
+aprire la cartella di un agente mostra i suoi documenti per serie e anno.
+
+### 10.3 Contenuto di un file
+
+Il file contiene **il documento stesso**, nel formato dell'entità §2 — nessun involucro:
 
 ```json
-{
-  "version": 1,
-  "updatedAt": "2026-07-22T09:40:00.000Z",
-  "ddt": [],
-  "counters": []
-}
+{ "id": "…", "numero": "26045GBE", "serie": "MS", "data": "2026-07-21", "…": "…" }
 ```
 
-| Campo | Tipo | Significato |
-| --- | --- | --- |
-| `version` | `number` | Versione dello schema dell'archivio, per future migrazioni. |
-| `updatedAt` | `string \| null` | Timestamp ISO dell'ultima scrittura, valorizzato dal backend. |
-| `ddt` | `DDT[]` | Elenco dei documenti, nel formato descritto in §2. |
-| `counters` | `array` | Residuo storico dei contatori; non usato dalle operazioni v2. |
-
-Serie, agente e anno dell'archivio sono espressi dal **nome del file**, interpretato per
-posizione (§10.2); il backend lo risolve da token + parametri, il contenuto non li ripete.
-
-> **Scelta di progetto.** Una versione precedente di questo documento prevedeva un involucro
-> `{ metadata, progressivo, documenti }`. L'implementazione ha mantenuto invece lo schema
-> storico `{ version, updatedAt, ddt, counters }`, identico per ogni archivio: nessuna
-> conversione in migrazione, nessun doppio formato. Un blocco `metadata` autodescrittivo resta
-> un'estensione possibile (campo nuovo, non breaking) se la dashboard ne avrà bisogno.
+Il timestamp di ultima modifica è quello del **file su Drive** (usato dalla sincronizzazione
+incrementale); non serve un campo dedicato nel contenuto.
 
 ### 10.4 Gestione del progressivo
 
-- Il progressivo è **locale all'archivio**: ogni combinazione serie + agente + anno ha la propria
-  sequenza, indipendente da tutte le altre.
-- Non esiste un campo contatore nell'archivio: il prossimo numero si ricava scansionando i
-  documenti della serie per l'anno dato e prendendo il massimo + 1 (§5.2). I documenti sono
-  l'unica fonte di verità.
-- Al cambio di anno nasce un nuovo archivio e il progressivo riparte da zero.
+- Il progressivo è **locale alla partizione** serie + agente + anno: ogni combinazione ha la
+  propria sequenza, indipendente da tutte le altre.
+- Non esiste un contatore sul server: il prossimo numero si ricava dai documenti locali della
+  serie per l'anno dato, massimo + 1 (§5.2). I documenti sono l'unica fonte di verità.
+- Al cambio di anno nasce una nuova cartella e il progressivo riparte da zero.
 
-### 10.5 Vantaggi degli archivi separati
+### 10.5 Vantaggi del file per documento
 
-- **Isolamento**: il dispositivo di un agente lavora solo sui propri archivi; un errore o una
-  corruzione resta circoscritta.
-- **Dimensione contenuta**: la crescita di un archivio dipende dai documenti di un solo agente in
-  un solo anno, non dal volume aziendale complessivo.
-- **Concorrenza ridotta**: agenti diversi scrivono su file diversi, eliminando gran parte dei
-  conflitti di scrittura simultanea.
+- **Scritture minime e atomiche**: salvare un DDT tocca un solo file; niente archivi cumulativi
+  da riscrivere, niente conflitti tra documenti diversi.
+- **Sync incrementale naturale**: il timestamp del file dice cosa è cambiato; viaggiano solo i
+  documenti modificati.
+- **Eliminazioni recuperabili**: un delete è un file nel cestino di Drive (30 giorni).
+- **Isolamento e riservatezza**: ogni agente lavora nelle proprie cartelle; un dispositivo
+  compromesso espone i documenti di un solo agente.
 - **Numerazione semplice**: i progressivi non devono essere coordinati tra utenti.
-- **Riservatezza**: la separazione limita per costruzione l'esposizione dei dati sanitari indiretti.
-- **Storicizzazione naturale**: gli archivi degli anni chiusi diventano immutabili.
+- **Storicizzazione naturale**: le cartelle degli anni chiusi diventano immutabili.
 
 ### 10.6 Estendibilità
 
-Aggiungere un archivio è un'operazione di configurazione: nasce alla prima emissione di un
-documento per una combinazione serie + agente + anno non ancora presente. Nuovi agenti, nuove
-serie e nuovi anni non richiedono modifiche al modello dati, al frontend o al backend.
+Nuovi agenti, nuove serie e nuovi anni sono cartelle che nascono alla prima emissione: nessuna
+modifica al modello dati, al frontend o al codice del backend.
 
 ### 10.7 Origine dei dati storici
 
-Lo storico dell'applicazione a utente singolo (60 DDT al 22/07/2026) è stato migrato in
-`MS_GBE_2026.json` senza alcuna modifica alla struttura dei documenti; i DDT privi di campo
-`serie` ricevono `MS` in normalizzazione.
+Lo storico (60 DDT al 22/07/2026) è passato per due migrazioni senza modifiche alla struttura
+del singolo documento: dall'archivio unico dell'app a utente singolo a `MS_GBE_2026.json` (v2),
+poi da lì ai file per documento (v3), collocati nell'anno indicato dalla loro data. I file
+cumulativi v2 restano su Drive in `Archivi/` (con la i finale) come backup inerte.
 
 ---
 
 ## 11. Identità del documento
 
 **Il numero DDT non identifica univocamente il documento.** Lo stesso numero può esistere
-legittimamente in archivi diversi: è una conseguenza voluta del fatto che il mittente non compare
-nella numerazione.
+legittimamente in partizioni diverse: è una conseguenza voluta del fatto che il mittente non
+compare nella numerazione.
 
-L'identità completa di un documento è:
-
-```
-serie documentale + codice agente + anno + numero DDT
-```
-
-ovvero, in forma equivalente e più compatta:
+L'identità completa di un documento è il suo **percorso**:
 
 ```
-nome archivio + numero DDT
+agente + serie documentale + anno + numero DDT
 ```
 
-Esempio: `27001MRU` non è sufficiente; `MS_MRU_2027.json` + `27001MRU` lo è.
+Esempio: `26007MRU` non è sufficiente; `Maurizio Russo/MS/2026/26007MRU.json` lo è.
 
 Conseguenze operative:
 
-- ogni ricerca, esportazione o ristampa deve trasportare l'archivio di provenienza insieme al
-  numero;
+- ogni ricerca, esportazione o ristampa deve trasportare la partizione di provenienza insieme
+  al numero;
 - la dashboard amministrativa non può indicizzare i documenti sul solo numero;
 - il campo `id` (UUID) resta l'unica chiave tecnica globalmente univoca e va preservato in
   qualunque migrazione.

@@ -9,10 +9,11 @@ Il documento è diviso in due parti:
   cambiare al variare del numero di utenti.
 
 > **Stato dell'applicazione.** Il modello descritto è **implementato** (luglio 2026): login con
-> codice agente + PIN, serie selezionabile, archivi per serie/agente/anno. La configurazione
-> reale vive in **`utenti.json`** nella cartella `DDT-Migliori` su Google Drive — utenti, serie
-> abilitate, hash dei PIN e mittenti per serie — letta dal backend a ogni richiesta. Le tabelle
-> di questo documento ne sono la descrizione, non la fonte.
+> codice agente + PIN, serie selezionabile, firma mittente personale, un file JSON per documento
+> in cartelle per agente/serie/anno. La configurazione reale vive in **`utenti.json`** nella
+> cartella `DDT-Migliori` su Google Drive — utenti, serie abilitate, hash dei PIN e mittenti per
+> serie — letta dal backend a ogni richiesta. Le tabelle di questo documento ne sono la
+> descrizione, non la fonte.
 
 ---
 
@@ -41,32 +42,32 @@ Utenze configurate in `utenti.json` (esempio di archivi riferito all'anno **2027
 di ciascun anno nascono alla prima emissione). Oltre alle utenze in tabella esiste **`ADMIN`**
 (Amministrazione, ruolo `admin`, abilitata in lettura a entrambe le serie) per la dashboard.
 
-| Nome | Codice | Ruolo | Serie abilitate | Archivi |
+| Nome | Codice | Ruolo | Serie abilitate | Cartelle archivio (es. 2027) |
 | --- | --- | --- | --- | --- |
-| Andrea Adragna | `AA` | Agente | MS | `MS_AA_2027.json` |
-| Angelo Butera | `AB` | Agente | MS | `MS_AB_2027.json` |
-| Annamaria Campo | `AMC` | Agente | MS | `MS_AMC_2027.json` |
-| Antonio Cavallaro | `AC` | Agente | MS | `MS_AC_2027.json` |
-| Antonio Russo | `AR` | Agente | MS | `MS_AR_2027.json` |
-| Cettina Dell'Ajra | `CD` | Agente | MS | `MS_CD_2027.json` |
-| David Gambino | `DG` | Agente | MS | `MS_DG_2027.json` |
-| Ennio Spadaro | `ES` | Agente | MS | `MS_ES_2027.json` |
-| Francesco Fragale | `FF` | Agente | MS | `MS_FF_2027.json` |
-| Giovanni Bennardo | `GBE` | Agente | MS | `MS_GBE_2027.json` |
-| Giovanni Incatasciato | `GI` | Agente | MS | `MS_GI_2027.json` |
-| Giuseppe Butera | `GB` | Agente | MS | `MS_GB_2027.json` |
-| Leonardo Pulvirenti | `LP` | Agente | MS | `MS_LP_2027.json` |
-| Marcello Catanese | `MC` | Agente | MS | `MS_MC_2027.json` |
-| Marcello Fragale | `MF` | Agente | MS | `MS_MF_2027.json` |
-| Mario Muscolino | `MM` | Agente | MS | `MS_MM_2027.json` |
-| Maurizio Raciti | `MR` | Agente | MS | `MS_MR_2027.json` |
-| Maurizio Russo | `MRU` | Agente | MS · PM | `MS_MRU_2027.json` · `PM_MRU_2027.json` |
-| Michele Sanseverino | `MS` | Agente | MS | `MS_MS_2027.json` |
-| Nicola Quazzico | `NQ` | Agente | MS | `MS_NQ_2027.json` |
-| Roberto Metta | `RM` | Agente | MS | `MS_RM_2027.json` |
-| Seby Savoca | `SS` | Agente | MS · PM | `MS_SS_2027.json` · `PM_SS_2027.json` |
-| Commerciale | `CS` | Postazione di struttura | MS · PM | `MS_CS_2027.json` · `PM_CS_2027.json` |
-| Magazzino | `MG` | Postazione di struttura | MS · PM | `MS_MG_2027.json` · `PM_MG_2027.json` |
+| Andrea Adragna | `AA` | Agente | MS | `Andrea Adragna/MS/2027/` |
+| Angelo Butera | `AB` | Agente | MS | `Angelo Butera/MS/2027/` |
+| Annamaria Campo | `AMC` | Agente | MS | `Annamaria Campo/MS/2027/` |
+| Antonio Cavallaro | `AC` | Agente | MS | `Antonio Cavallaro/MS/2027/` |
+| Antonio Russo | `AR` | Agente | MS | `Antonio Russo/MS/2027/` |
+| Cettina Dell'Ajra | `CD` | Agente | MS | `Cettina Dell'Ajra/MS/2027/` |
+| David Gambino | `DG` | Agente | MS | `David Gambino/MS/2027/` |
+| Ennio Spadaro | `ES` | Agente | MS | `Ennio Spadaro/MS/2027/` |
+| Francesco Fragale | `FF` | Agente | MS | `Francesco Fragale/MS/2027/` |
+| Giovanni Bennardo | `GBE` | Agente | MS | `Giovanni Bennardo/MS/2027/` |
+| Giovanni Incatasciato | `GI` | Agente | MS | `Giovanni Incatasciato/MS/2027/` |
+| Giuseppe Butera | `GB` | Agente | MS | `Giuseppe Butera/MS/2027/` |
+| Leonardo Pulvirenti | `LP` | Agente | MS | `Leonardo Pulvirenti/MS/2027/` |
+| Marcello Catanese | `MC` | Agente | MS | `Marcello Catanese/MS/2027/` |
+| Marcello Fragale | `MF` | Agente | MS | `Marcello Fragale/MS/2027/` |
+| Mario Muscolino | `MM` | Agente | MS | `Mario Muscolino/MS/2027/` |
+| Maurizio Raciti | `MR` | Agente | MS | `Maurizio Raciti/MS/2027/` |
+| Maurizio Russo | `MRU` | Agente | MS · PM | `Maurizio Russo/MS/2027/` · `Maurizio Russo/PM/2027/` |
+| Michele Sanseverino | `MS` | Agente | MS | `Michele Sanseverino/MS/2027/` |
+| Nicola Quazzico | `NQ` | Agente | MS | `Nicola Quazzico/MS/2027/` |
+| Roberto Metta | `RM` | Agente | MS | `Roberto Metta/MS/2027/` |
+| Seby Savoca | `SS` | Agente | MS · PM | `Seby Savoca/MS/2027/` · `Seby Savoca/PM/2027/` |
+| Commerciale | `CS` | Postazione di struttura | MS · PM | `Commerciale/MS/2027/` · `Commerciale/PM/2027/` |
+| Magazzino | `MG` | Postazione di struttura | MS · PM | `Magazzino/MS/2027/` · `Magazzino/PM/2027/` |
 
 Sintesi: **25 utenze** — 22 agenti, 2 postazioni di struttura e l'utenza amministrativa;
 **20 abilitate alla sola serie MS** e **4 operative su entrambe le serie**. Gli archivi
@@ -81,6 +82,10 @@ risultanti per un anno pieno sono 28.
   dall'editor Apps Script. La funzione `setupPinIniziali()` riporta **tutti** i PIN allo schema
   iniziale: è solo per emergenze.
 - Le sessioni durano 30 giorni e si rinnovano a ogni uso; il logout le revoca.
+- Al primo accesso l'app propone anche il **passo firma** (saltabile): l'agente disegna la
+  propria firma mittente, salvata sul backend (`Firme/<CODICE>.txt`) e usata in stampa.
+  Resta modificabile in ogni momento da "La mia firma". Le postazioni di struttura possono
+  saltare il passo: i loro documenti si firmano a penna.
 
 > **Nota sui codici agente.** I codici hanno lunghezza variabile (2 o 3 caratteri) e alcuni non
 > derivano meccanicamente dalle iniziali del nome: `GBE` per Giovanni Bennardo distingue l'utente
@@ -89,9 +94,10 @@ risultanti per un anno pieno sono 28.
 > calcolabile dal nome: va trattato come tale e non ricostruito via codice.
 
 > **Nota sul codice `MS`.** Michele Sanseverino ha codice agente `MS`, che coincide con la sigla
-> della serie documentale `MS`. Il nome archivio risultante è `MS_MS_2027.json`: formalmente
-> corretto, perché serie e codice agente occupano posizioni distinte nella nomenclatura, ma il
-> parsing del nome archivio va fatto per posizione e mai per ricerca della sottostringa.
+> della serie documentale `MS`. Con la struttura a cartelle l'ambiguità non esiste: il livello
+> agente usa il **nome esteso** (`Michele Sanseverino/MS/2027/`) e la sigla della serie occupa
+> un livello dedicato. Resta la regola generale: serie e codice non vanno mai dedotti per
+> ricerca di sottostringa, solo per posizione.
 
 ---
 
@@ -150,10 +156,10 @@ l'organico cambia.
 
 | Entità | Definizione |
 | --- | --- |
-| **Utente** | Chi accede all'applicazione. Ha un nome, un ruolo e un insieme di serie abilitate. |
-| **Codice agente** | Identificativo breve assegnato all'utente, stabile nel tempo. Compare nella numerazione e nel nome degli archivi. |
+| **Utente** | Chi accede all'applicazione. Ha un nome, un ruolo, un insieme di serie abilitate e una firma personale. |
+| **Codice agente** | Identificativo breve assegnato all'utente, stabile nel tempo. Compare nella numerazione. |
 | **Serie documentale** | Soggetto emittente. Determina il mittente stampato. |
-| **Archivio** | File JSON che raccoglie i documenti di una combinazione serie + agente + anno. |
+| **Partizione** | Cartella `Archivio/<Nome>/<Serie>/<Anno>/` che contiene i documenti (un file JSON per DDT). |
 
 ## 5. Relazioni
 
@@ -162,15 +168,20 @@ Utente ──< abilitato a >── Serie documentale
    │                              │
    └──────────┬───────────────────┘
               ▼
-      Archivio (serie + agente + anno)
+   Partizione (agente / serie / anno)
+              │
+              ▼
+     un file JSON per DDT
 ```
 
 - Un utente è abilitato a **una o più serie**.
-- Ogni combinazione **serie + agente + anno** genera esattamente **un archivio**.
-- Un archivio appartiene a **un solo utente** e a **una sola serie**.
-- Il numero di archivi cresce linearmente con utenti, serie e anni, senza che la struttura cambi.
+- Ogni combinazione **agente + serie + anno** è una **partizione**: una cartella con un file
+  JSON per ciascun documento.
+- Una partizione appartiene a **un solo utente** e a **una sola serie**.
+- Il numero di partizioni cresce linearmente con utenti, serie e anni, senza che la struttura
+  cambi.
 
-Struttura e nomenclatura degli archivi sono definite in [DATA_MODEL.md](DATA_MODEL.md).
+Percorsi e nomi dei file sono definiti in [DATA_MODEL.md](DATA_MODEL.md#102-percorso-e-nome-dei-file).
 
 ## 6. Aggiungere un nuovo utente
 
@@ -179,10 +190,11 @@ L'inserimento di un agente è un'operazione di **configurazione**, mai di svilup
 1. **Aggiungere l'utente a `utenti.json`** su Drive (a mano o dall'editor Apps Script):
    `{ "codice": "XY", "nome": "Nome Cognome", "serie": ["MS"], "ruolo": "agente", "attivo": true, "pinHash": null }`.
 2. **Assegnare il PIN iniziale** con `impostaPin('XY', 'XY1234')` dall'editor Apps Script.
-3. **Consegnare codice e PIN** all'agente, che al primo accesso dovrà sostituirlo.
+3. **Consegnare codice e PIN** all'agente: al primo accesso sostituirà il PIN e disegnerà la
+   propria firma — il resto dell'onboarding è self-service.
 
-Gli archivi corrispondenti vengono creati alla prima emissione di un documento. Non è richiesta
-alcuna modifica al frontend, al modello dati o al codice del backend.
+Le cartelle dell'agente nascono alla prima emissione di un documento. Non è richiesta alcuna
+modifica al frontend, al modello dati o al codice del backend.
 
 Per **disattivare** un utente basta impostare `"attivo": false` in `utenti.json`: login e
 operazioni vengono rifiutati, gli archivi già emessi restano consultabili dalla dashboard.
@@ -191,9 +203,10 @@ operazioni vengono rifiutati, gli archivi già emessi restano consultabili dalla
 
 - **Nuova serie**: si aggiunge la voce in `utenti.json` (sigla + righe del mittente nella sezione
   `serie`) e la si abilita agli utenti interessati. Nessun'altra modifica.
-- **Nuovo anno**: gli archivi dell'anno successivo nascono automaticamente alla prima emissione,
-  con progressivo che riparte da zero. Gli archivi degli anni precedenti restano immutati e
-  consultabili.
+- **Nuovo anno**: le cartelle dell'anno successivo nascono automaticamente alla prima emissione,
+  con progressivo che riparte da zero. Le cartelle degli anni precedenti restano immutate e
+  consultabili (l'app sincronizza anno corrente e precedente; gli anni più vecchi restano su
+  Drive per la dashboard).
 
 ## 8. Criterio di scalabilità
 
@@ -202,12 +215,12 @@ Il modello si considera valido finché valgono tutte queste condizioni:
 - aggiungere un utente non richiede modifiche al codice;
 - aggiungere una serie non richiede modifiche al codice;
 - il passaggio di anno non richiede alcun intervento manuale;
-- nessun componente deve caricare tutti gli archivi insieme per funzionare;
-- la dimensione del singolo archivio resta limitata dai documenti di **un agente, una serie, un
-  anno**.
+- nessun componente deve caricare tutti i documenti dell'azienda insieme per funzionare;
+- il traffico di sincronizzazione resta proporzionale alle **modifiche**, non alla dimensione
+  dell'archivio.
 
-L'ultimo punto è il motivo principale della separazione degli archivi: il carico sul dispositivo
-dell'agente non cresce con il numero di colleghi.
+Il carico sul dispositivo dell'agente non cresce né con il numero di colleghi né, a regime, con
+lo storico accumulato.
 
 ---
 

@@ -3,11 +3,11 @@
 Applicazione web (PWA) **multiutente** per creare, modificare, archiviare e stampare **Documenti
 di Trasporto (DDT)** in ambito dispositivi medici / protesi ortopediche.
 
-Ogni agente accede con il proprio codice e PIN e lavora sui propri archivi, uno per serie
-documentale e anno, conservati su Google Drive tramite Google Apps Script. L'app funziona
-**offline** (le operazioni si accodano e partono al ritorno della rete) ed è affiancata da un
-servizio OCR che legge etichette prodotto e documenti di scarico sala operatoria per precompilare
-il DDT.
+Ogni agente accede con il proprio codice e PIN e lavora sui propri documenti, conservati su
+Google Drive (un file JSON per DDT, in cartelle per agente, serie documentale e anno) tramite
+Google Apps Script, con **sincronizzazione incrementale**. L'app funziona **offline** (le
+operazioni si accodano e partono al ritorno della rete) ed è affiancata da un servizio OCR che
+legge etichette prodotto e documenti di scarico sala operatoria per precompilare il DDT.
 
 ---
 
@@ -20,14 +20,19 @@ il DDT.
 - Numerazione automatica progressiva **per serie e anno**: prefisso di due cifre dell'anno +
   progressivo + codice agente (`26001GBE` nel 2026, `27001GBE` nel 2027), con progressivo che
   riparte ogni anno.
-- Un **archivio JSON indipendente** per ogni serie + agente + anno (`MS_GBE_2026.json`), con
-  scritture per singolo documento: nessun client può sovrascrivere l'archivio di un altro.
+- **Un file JSON per documento** su Drive (`Archivio/<Agente>/<Serie>/<Anno>/<Numero>.json`):
+  scritture atomiche per singolo DDT, sincronizzazione incrementale (viaggiano solo i documenti
+  modificati), eliminazioni recuperabili dal cestino di Drive.
+- Archivio in app con **ultimi 5 di default**, chip `Ultimi 5 · 30 · Tutti` e ricerca live su
+  numero e cliente.
 - OCR etichetta singola (REF / LOT / descrizione) e OCR documento di scarico completo.
-- Firma del destinatario tracciata a schermo (canvas) e firma mittente come immagine PNG;
-  mittente di stampa derivato dalla serie del documento.
+- Firma del destinatario tracciata a schermo e **firma mittente personale di ogni agente**
+  (disegnata al primo accesso, ritagliata automaticamente); mittente di stampa derivato dalla
+  serie del documento.
 - Stampa in layout tabellare con **12 righe per pagina**; i documenti più lunghi proseguono su
-  più pagine, ognuna copia completa del modulo.
-- Funzionamento offline tramite Service Worker + coda operazioni + installabilità come PWA.
+  più pagine, ognuna copia completa del modulo; firme vincolate a 200×48 px.
+- Funzionamento offline tramite Service Worker + coda operazioni + installabilità come PWA;
+  dati locali separati per agente sulle postazioni condivise.
 
 ---
 
@@ -72,7 +77,7 @@ Apri poi `http://localhost:8000/index.html` in un browser moderno.
 | `backend/ocr-endpoint.example.js` | Esempio di endpoint OCR self-hosted (Express). |
 | `assets/` | Risorse statiche (firma mittente). |
 
-Il backend dati (Apps Script v2) non vive nel repository: è nel Google account del progetto.
+Il backend dati (Apps Script v3.1) non vive nel repository: è nel Google account del progetto.
 Contratto in [docs/API.md](docs/API.md).
 
 ---
@@ -98,8 +103,8 @@ utenza amministrativa).
 
 | Componente | Stato |
 | --- | --- |
-| Backend v2 (multiarchivio, operazioni atomiche, autenticazione) | ✅ Completato |
-| Frontend Login (PIN, cambio obbligatorio, selezione serie) | ✅ Completato |
+| Backend v3.1 (un file per DDT, sync incrementale, autenticazione, firme) | ✅ Completato |
+| Frontend Login (PIN, cambio obbligatorio, selezione serie, firma mittente) | ✅ Completato |
 | Offline Queue (coda operazioni con invio automatico) | ✅ Completato |
 | Dashboard Admin (consultazione, ristampa, export) | ⏳ Pianificata (M11) |
 | Deploy Vercel + repository privato | ⏳ Pianificato (M12) |

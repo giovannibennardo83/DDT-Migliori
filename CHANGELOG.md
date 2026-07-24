@@ -59,6 +59,11 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
   disegnata alta non sfonda più la pagina A4 su due pagine.
 
 ### Modificato
+- Documentazione riallineata al backend v3.1: file per documento
+  (`Archivio/<Agente>/<Serie>/<Anno>/<Numero>.json`), sincronizzazione incrementale, dati
+  locali per agente, firma mittente personale. Aggiornati README, CLAUDE (decisioni e vincoli),
+  ROADMAP (evoluzioni post-baseline E1–E3, baseline v3.1), `docs/ARCHITECTURE.md`,
+  `docs/DATA_MODEL.md`, `docs/API.md`, `docs/USERS.md`.
 - Archivio più leggibile: di default mostra gli **ultimi 5** DDT, con chip `Ultimi 5 ·
   Ultimi 30 · Tutti` (scelta ricordata per agente), **ricerca live** su numero e cliente che
   ignora il limite attivo, e riga di stato "Mostrati X di Y · Mostra tutti".

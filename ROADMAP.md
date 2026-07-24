@@ -37,9 +37,9 @@ numero di utenti. La configurazione aziendale reale è documentata in [docs/USER
 | Frontend | HTML / CSS / JS vanilla, invariato ✅ |
 | Persistenza locale | `localStorage` + IndexedDB, invariata ✅ |
 | Accesso al backend | Storage Service (`storage.js`) come livello di astrazione ✅ |
-| Backend | Apps Script v2: multiarchivio, operazioni per documento, login a PIN ✅ |
-| Storage | Google Drive dedicato (`DDT-Migliori/Archivi/`) ✅ |
-| Archivi | un archivio JSON per serie, agente e anno ✅ |
+| Backend | Apps Script v3.1: un file per DDT, sync incrementale, login a PIN, firme ✅ |
+| Storage | Google Drive dedicato (`DDT-Migliori/Archivio/<Agente>/<Serie>/<Anno>/`) ✅ |
+| Archivi | un file JSON per documento ✅ |
 | Consultazione | dashboard amministrativa centralizzata ⏳ (M11) |
 
 Dettagli in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -78,7 +78,8 @@ verso il backend dati.
 
 ### ☑ M06 — Archivi JSON separati
 Un file per ogni combinazione serie + agente + anno, standard
-`<SERIE>_<CODICEAGENTE>_<ANNO>.json`, creato alla prima scrittura.
+`<SERIE>_<CODICEAGENTE>_<ANNO>.json`, creato alla prima scrittura. *(Organizzazione poi superata
+dall'evoluzione E1: un file per documento.)*
 
 ### ☑ M07 — Backend multiarchivio a operazioni per documento
 Deviazione migliorativa rispetto al piano: oltre al routing per serie/agente/anno, il contratto è
@@ -110,11 +111,32 @@ ricerca per cliente e per agente, ristampa PDF dal JSON, export dati.
 Deploy della PWA su Vercel, repository GitHub reso privato, consolidamento e distribuzione dei
 PIN iniziali agli agenti.
 
-> **Baseline.** Le milestone M01–M10 costituiscono la **baseline definitiva del backend v2**:
-> multiarchivio per serie/agente/anno, operazioni atomiche per documento, autenticazione a PIN
-> con autorizzazioni lato server. Gli sviluppi successivi (dashboard, pubblicazione, futuri
-> irrobustimenti) si costruiscono sopra questa base senza rimetterla in discussione; ogni
-> proposta che la contraddica va trattata come revisione architetturale, non come evoluzione.
+---
+
+## Evoluzioni post-baseline (luglio 2026)
+
+Completate le milestone, tre evoluzioni decise sull'uso reale, tutte ☑:
+
+### ☑ E1 — Backend v3: un file per documento e sync incrementale
+Ogni DDT diventa un file JSON a sé (`Archivio/<Nome Agente>/<Serie>/<Anno>/<Numero>.json`);
+la sincronizzazione scarica solo i documenti modificati (parametro `dopo` + elenco per le
+eliminazioni); i file eliminati vanno nel cestino di Drive. Dati locali separati per agente.
+
+### ☑ E2 — Vista archivio
+Elenco con ultimi 5 di default, chip `Ultimi 5 · 30 · Tutti` e ricerca live su numero e
+cliente. Corretto in corsa un difetto latente (risoluzione dei documenti per posizione anziché
+per id).
+
+### ☑ E3 — Firma mittente per agente (backend v3.1)
+Firma personale disegnata nell'app al primo accesso (saltabile), salvata sul backend e usata in
+stampa; rimossa la firma cablata negli asset; ritaglio automatico e vincolo 200×48 px in stampa.
+
+> **Baseline.** Le milestone M01–M10 più le evoluzioni E1–E3 costituiscono la **baseline
+> definitiva del backend v3.1**: un file per documento, sincronizzazione incrementale,
+> operazioni atomiche, autenticazione a PIN con autorizzazioni lato server, firme per agente.
+> Gli sviluppi successivi (dashboard, pubblicazione, futuri irrobustimenti) si costruiscono
+> sopra questa base senza rimetterla in discussione; ogni proposta che la contraddica va
+> trattata come revisione architetturale, non come evoluzione.
 
 ---
 

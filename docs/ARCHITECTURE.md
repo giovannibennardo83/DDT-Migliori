@@ -18,11 +18,12 @@ autenticazione e archivi su Google Drive, il servizio OCR è una funzione server
 │  index.html (login + app)                          │
 │      │                                             │
 │  app.js ─── db.js ──┬─ localStorage  (DDT, coda,   │
-│      │      │       │                 sessione)    │
+│      │      │       │      sessione — per agente)  │
 │      │      │       └─ IndexedDB     (contatori)   │
 │      │      │                                      │
-│      │   storage.js ──► Apps Script v2 (HTTPS)     │
-│      │                  login·leggi·upsert·delete  │
+│      │   storage.js ──► Apps Script v3.1 (HTTPS)   │
+│      │        login · leggi incrementale · upsert  │
+│      │        delete · salvaFirma · cambiaPin      │
 │      ├──► servizio OCR (HTTPS)                     │
 │      │                                             │
 │  print.html ── print.css  ──► PDF (stampa)         │
@@ -31,9 +32,11 @@ autenticazione e archivi su Google Drive, il servizio OCR è una funzione server
                      │                    │
                      ▼                    ▼
              OpenAI Vision          Google Drive
-              (via /api/ocr)   DDT-Migliori/Archivi/
-                                <SERIE>_<COD>_<ANNO>.json
-                                + utenti.json
+              (via /api/ocr)     DDT-Migliori/
+                                 ├ utenti.json
+                                 ├ Firme/<COD>.txt
+                                 └ Archivio/<Agente>/<Serie>/
+                                    <Anno>/<Numero>.json
 ```
 
 ---
@@ -46,8 +49,8 @@ autenticazione e archivi su Google Drive, il servizio OCR è una funzione server
 | --- | --- |
 | `index.html` | Struttura della UI: schermata di login, form di testata, contenitore righe, archivio, modale firma, barra utente. |
 | `config.js` | Endpoint dell'applicazione (`backendUrl`, `ocrUrl`). |
-| `storage.js` | **Storage Service**: sessione e token, login/logout/cambio PIN, operazioni per documento, coda offline, lettura archivi remoti. |
-| `app.js` | Orchestrazione: gestione righe, validazioni, OCR, firma, numerazione, sync, login UI, rendering della lista. |
+| `storage.js` | **Storage Service**: sessione e token, login/logout/cambio PIN, firma mittente, operazioni per documento, coda offline, sincronizzazione incrementale. |
+| `app.js` | Orchestrazione: gestione righe, validazioni, OCR, firme (destinatario e mittente), numerazione, sync, login UI, vista archivio con filtri e ricerca. |
 | `db.js` | Persistenza locale: lettura/scrittura DDT, normalizzazione, contatori progressivi. |
 | `styles.css` | Stili UI; su mobile le righe diventano card. |
 | `print.html` / `print.css` | Documento di stampa, 12 righe per pagina con paginazione automatica. |
@@ -57,9 +60,11 @@ scope globale. L'ordine è vincolante: `config.js` → `storage.js` → `db.js` 
 
 ### 2.2 Persistenza locale
 
-- **`localStorage`** — `ddtRecords`: i DDT dell'utente; `ddtSession`: token e profilo di
-  sessione; `ddtOpsPending`: coda delle operazioni offline; `ddtLastUser`: ultimo codice agente
-  (per azzerare i dati locali al cambio di utente); `printDDT`: payload di stampa.
+- **`localStorage`** — chiavi globali: `ddtSession` (token, profilo, firma), `ddtLastUser`
+  (precompilazione login), `printDDT` (payload di stampa). Chiavi **per agente**
+  (`_<CODICE>`): `ddtRecords` (documenti), `ddtOpsPending` (coda offline), `ddtLastSync`
+  (marcatori della sync incrementale), `ddtVistaArchivio` (preferenza di visualizzazione).
+  Sulle postazioni condivise il cambio utente non tocca i dati degli altri.
 - **IndexedDB**, database `ddt-db` (v1), object store `counters` con `keyPath: 'anno'`:
   ultimo progressivo utilizzato per anno, usato come backup del calcolo della numerazione.
 
@@ -84,7 +89,7 @@ sync). Il login richiede la rete; la sessione, una volta creata, vale anche offl
 | Servizio | Endpoint | Ruolo |
 | --- | --- | --- |
 | OCR | `POST /api/ocr` (funzione serverless) | Estrazione dati da immagine tramite OpenAI Vision. |
-| Backend dati | Apps Script v2 Web App (`POST` con `azione`) | Login, autorizzazione, lettura archivi, upsert/delete per documento su Google Drive. |
+| Backend dati | Apps Script v3.1 Web App (`POST` con `azione`) | Login, autorizzazione, lettura archivi, upsert/delete per documento su Google Drive. |
 
 Contratti dettagliati in [API.md](API.md).
 
@@ -96,10 +101,13 @@ Contratti dettagliati in [API.md](API.md).
 
 1. Senza sessione, l'app mostra la **schermata di login** (codice agente + PIN).
 2. Al primo accesso il PIN iniziale (schema `CODICE1234`) va sostituito obbligatoriamente.
-3. Gli utenti abilitati a più serie scelgono la **serie attiva**; il profilo e i mittenti per
-   serie arrivano dal backend col login e restano nella sessione.
-4. Se sul dispositivo accede un codice diverso dal precedente, i dati locali vengono azzerati e
-   riscaricati dagli archivi del nuovo utente.
+3. Sempre al primo accesso viene proposto il **passo firma** (saltabile): l'agente disegna la
+   propria firma mittente, che viene ritagliata e salvata sul backend. Resta modificabile dal
+   pulsante "La mia firma" nella barra utente.
+4. Gli utenti abilitati a più serie scelgono la **serie attiva**; profilo, mittenti per serie e
+   firma arrivano dal backend col login e restano nella sessione.
+5. I dati locali sono separati per agente: sulle postazioni condivise il cambio utente non
+   azzera né espone nulla.
 
 ### 3.1 Creazione di un DDT
 
@@ -109,33 +117,37 @@ Contratti dettagliati in [API.md](API.md).
    e anno del documento**, col codice agente della sessione.
 4. Al salvataggio, i dati passano da `normalizeDDTStorage()` e vengono scritti in `localStorage`.
    Vengono conservate **tutte** le righe compilate: nessun passaggio applica un limite.
-5. Lo Storage Service invia l'**`upsert` del solo documento** all'archivio corrispondente
-   (serie del documento + anno della sua data); senza rete l'operazione va in coda.
+5. Lo Storage Service invia l'**`upsert` del solo documento**, che sul backend diventa la
+   scrittura di **un singolo file** (`Archivio/<Nome>/<Serie>/<Anno>/<Numero>.json`); senza
+   rete l'operazione va in coda.
 
-L'eliminazione segue lo stesso schema con l'operazione `delete`.
+L'eliminazione segue lo stesso schema con `delete`: il file finisce nel cestino di Drive.
 
-### 3.2 Sincronizzazione
+### 3.2 Sincronizzazione incrementale
 
-`syncDDT()` viene eseguita all'avvio, ogni 5 minuti e all'evento `online`, se esiste una
-sessione e non c'è già una sync in corso:
+`syncDDT()` viene eseguita all'avvio (con indicatore di attesa), ogni 5 minuti e all'evento
+`online` (silenziosamente), se esiste una sessione e non c'è già una sync in corso:
 
 1. **Svuota la coda** delle operazioni in attesa.
-2. Legge gli archivi remoti dell'utente: ogni serie abilitata × anno corrente e precedente.
-3. A coda vuota **il server è autorevole**: la lista locale viene sostituita, così le
-   eliminazioni fatte da altri dispositivi si propagano. Con operazioni ancora in coda — o con
-   un remoto inaspettatamente vuoto a fronte di dati locali — si applica il merge conservativo
-   di `mergeDDTLists()` (chiave `id`, conflitti risolti su `updatedAt`, firma del destinatario
-   sempre preservata).
-4. Il risultato viene salvato in locale, i contatori aggiornati e la lista ri-renderizzata.
+2. Per ogni **partizione** (serie abilitata × anno corrente e precedente) chiede al backend i
+   soli documenti **modificati dall'ultima sync** (`dopo`), insieme all'elenco completo dei
+   numeri presenti.
+3. I documenti ricevuti aggiornano la copia locale; i documenti locali della partizione assenti
+   dall'elenco (e non in coda) sono stati **eliminati altrove** e vengono rimossi anche qui.
+4. Il risultato viene salvato in locale, i contatori aggiornati e la lista ri-renderizzata; il
+   timestamp server della risposta diventa il prossimo `dopo`.
 
-Non esiste più alcuna scrittura dell'archivio completo: la classe di incidenti "un client
-sovrascrive tutto" (accaduto il 22/07/2026 col vecchio contratto) è chiusa per costruzione.
+A regime il traffico è proporzionale alle modifiche, non alla dimensione dell'archivio. Non
+esiste alcuna scrittura cumulativa: la classe di incidenti "un client sovrascrive tutto"
+(accaduta il 22/07/2026 col contratto originale) è chiusa per costruzione.
 
 ### 3.3 Stampa
 
-`print.html` legge il DDT selezionato e lo impagina in una tabella, con firma mittente (PNG) e
-firma destinatario (immagine generata dal canvas) nel footer. Il PDF è prodotto dal motore di
-stampa del browser e **non viene archiviato**.
+`print.html` legge il DDT selezionato e lo impagina in una tabella, con la **firma mittente
+personale dell'agente** e la firma del destinatario nel footer. Se l'agente non ha ancora una
+firma, resta la riga da firmare a penna — mai una firma di riserva altrui. Entrambe le firme
+sono vincolate a **max 200×48 px** a proporzioni conservate: non possono alterare
+l'impaginazione. Il PDF è prodotto dal motore di stampa del browser e **non viene archiviato**.
 
 **Regola sul numero di righe.** Il modulo prevede **12 righe per pagina** (`ROWS_PER_PAGE` in
 `print.html`):
@@ -166,16 +178,16 @@ Service** e la **schermata di login**.
 
 | Livello | Realizzazione |
 | --- | --- |
-| Frontend | invariato nella compilazione; aggiunti login e barra utente |
-| Persistenza locale | `localStorage` + IndexedDB, invariata; aggiunte sessione e coda |
+| Frontend | invariato nella compilazione; aggiunti login, barra utente, vista archivio con filtri |
+| Persistenza locale | `localStorage` + IndexedDB; chiavi separate per agente |
 | Configurazione | endpoint in `config.js`; utenti, serie e mittenti in `utenti.json` sul Drive |
 | Accesso al backend | Storage Service (`storage.js`) come livello di astrazione |
-| Backend | Apps Script v2 multiarchivio, operazioni per documento, lock sulle scritture |
-| Storage | un JSON per serie, agente e anno |
-| Accesso | login con codice + PIN, token di sessione, selezione della serie |
+| Backend | Apps Script v3.1: un file per documento, sync incrementale, lock sulle scritture |
+| Storage | `Archivio/<Agente>/<Serie>/<Anno>/<Numero>.json` + `Firme/` + `utenti.json` |
+| Accesso | login con codice + PIN, token di sessione, selezione della serie, firma personale |
 | Consultazione | dashboard amministrativa centralizzata (M11, in arrivo) |
 
-La distinzione tra mittenti avviene a livello di archivio, non di numerazione (vedi
+La distinzione tra mittenti avviene a livello di cartella serie, non di numerazione (vedi
 [DATA_MODEL.md](DATA_MODEL.md) e [USERS.md](USERS.md)).
 
 ### 4.1 Catena dei livelli
@@ -189,28 +201,29 @@ Apps Script
    ↓
 Google Drive
    ↓
-Archivio JSON
+File JSON per documento
    ↓
 Dashboard amministrativa
 ```
 
 Ogni livello conosce solo quello immediatamente successivo. La dashboard amministrativa si colloca
-in fondo alla catena perché **legge gli archivi** prodotti dal flusso operativo: è un consumatore
+in fondo alla catena perché **legge i documenti** prodotti dal flusso operativo: è un consumatore
 in sola lettura, non un'applicazione parallela che scrive sugli stessi dati.
 
 ### 4.2 Storage Service
 
 Lo **Storage Service** (`storage.js`) è il livello di astrazione tra la logica applicativa e il
 backend: `app.js` e `db.js` non eseguono `fetch` verso Apps Script, passano da un'unica
-interfaccia orientata al documento (`login`, `leggiRemoti`, `upsert`, `remove`, `cambiaPin`,
-`flushQueue`).
+interfaccia orientata al documento (`login`, `sincronizza`, `upsert`, `remove`, `salvaFirma`,
+`cambiaPin`, `flushQueue`).
 
 Cosa incapsula:
 
-- la sessione: token, profilo utente, serie attiva, mittenti per serie;
-- il routing delle operazioni: la serie del documento e l'anno della sua data determinano
-  l'archivio di destinazione (il codice agente lo mette il server, dal token);
+- la sessione: token, profilo utente, serie attiva, mittenti per serie, firma mittente;
+- il routing delle operazioni: la serie del documento e l'anno della sua data determinano la
+  cartella di destinazione (il nome dell'agente lo mette il server, dal token);
 - la **coda offline** e le regole di reinvio;
+- la **sincronizzazione incrementale** con i marcatori per partizione;
 - il dettaglio del trasporto (URL, formato della richiesta, mappatura degli errori, evento di
   sessione scaduta).
 
@@ -226,21 +239,20 @@ Cosa ne guadagna il progetto:
 
 L'architettura scala senza modifiche sostanziali perché il carico non è condiviso:
 
-- **Il lavoro è partizionato per archivio.** Un agente legge e scrive solo i propri archivi: il
+- **Il lavoro è partizionato per agente.** Ciascuno legge e scrive solo le proprie cartelle: il
   volume trattato dal suo dispositivo non dipende dal numero di colleghi.
-- **Non esiste stato globale da coordinare.** I progressivi sono locali all'archivio, quindi non
-  serve un contatore centrale né un meccanismo di lock distribuito.
-- **La concorrenza in scrittura è quasi assente.** Agenti diversi scrivono file diversi; i
-  conflitti restano confinati al caso di un singolo utente su più dispositivi.
-- **L'aggiunta di un utente è configurazione.** Nuovi archivi nascono alla prima emissione, senza
+- **Non esiste stato globale da coordinare.** I progressivi sono locali alla partizione, quindi
+  non serve un contatore centrale.
+- **La concorrenza in scrittura è quasi assente.** Ogni salvataggio tocca un solo file; agenti
+  diversi scrivono in cartelle diverse.
+- **L'aggiunta di un utente è configurazione.** Le cartelle nascono alla prima emissione, senza
   interventi sul codice (vedi [USERS.md](USERS.md#6-aggiungere-un-nuovo-utente)).
-- **La crescita è lineare e prevedibile.** Il numero di archivi cresce con utenti × serie × anni,
-  ma nessun componente deve caricarli tutti insieme.
+- **Il traffico è proporzionale alle modifiche**, non alla dimensione dell'archivio, grazie alla
+  sync incrementale.
 
-Il limite pratico non è quindi il numero di agenti, ma la dimensione del singolo archivio, che
-dipende dai documenti di un solo agente in un solo anno. Se un giorno diventasse un problema, la
-risposta naturale sarebbe una partizione più fine (per esempio per semestre), senza cambiare
-l'architettura.
+Il costo che cresce col volume è l'enumerazione dei file di una cartella anno in `leggi`
+(lineare nel numero di documenti dell'agente in quell'anno): alle dimensioni del progetto —
+centinaia di documenti per agente l'anno — resta ampiamente dentro i limiti di Apps Script.
 
 ---
 
@@ -251,11 +263,13 @@ l'architettura.
 - `app.js` è un file unico di dimensioni rilevanti, senza separazione in moduli.
 - L'autenticazione è applicativa su deployment pubblico, senza rate limiting; il salt dei PIN è
   una costante nello script Apps Script (vedi [API.md](API.md#3-sicurezza--stato-attuale)).
-- Il codice del backend Apps Script v2 non è versionato in questo repository: vive solo
+- Il codice del backend Apps Script v3.1 non è versionato in questo repository: vive solo
   nell'editor di Apps Script. Una copia andrebbe salvata nel repo o in un repo dedicato.
-- Un DDT eliminato mentre un altro dispositivo dello **stesso utente** è offline può riapparire
-  sul dispositivo offline fino alla sua prima sync a coda vuota (poi il server, autorevole, lo
-  rimuove anche lì). Non ci sono tombstone.
+- Il timestamp usato dalla sync incrementale è quello di modifica del file su Drive: uno
+  spostamento o una modifica manuale dei file rifà comparire il documento come "cambiato"
+  (innocuo) — ma una modifica manuale che rinomina un file può disallineare elenco e contenuto.
+- I documenti con data anteriore all'anno precedente non vengono sincronizzati sui dispositivi
+  (per scelta): restano su Drive e saranno consultabili dalla dashboard.
 - `ROWS_PER_PAGE` è definita in `print.html` e non deriva da una costante condivisa con il resto
   dell'applicazione: un'eventuale modifica del modulo va riportata a mano.
 - Il layout di stampa non è verificato automaticamente: il caso multipagina va ricontrollato a
