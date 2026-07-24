@@ -71,6 +71,10 @@ input, textarea {
 .qty-wrap { grid-template-columns: 1fr auto; gap: 0.35rem; align-items: start; }
 .qty-wrap .error-message { grid-column: 1 / -1; }
 
+/* Senza un minimo, su desktop il pulsante "Rimuovi riga" schiaccia l'input
+   quantita' fino a lasciare visibili solo le freccette. */
+.qty-wrap input { min-width: 4.5rem; }
+
 .actions, li { display: flex; gap: 0.5rem; align-items: center; }
 .actions { margin-top: 1rem; flex-wrap: wrap; }
 .item-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
