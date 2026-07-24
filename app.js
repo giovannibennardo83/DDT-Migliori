@@ -731,12 +731,20 @@ async function handleOcrFileChange(event) {
     const result = await response.json();
     const ref = String(result?.ref || '').trim();
     const lot = String(result?.lot || '').trim();
+    const description = String(result?.description || '').trim();
 
     const codiceInput = row.querySelector('.codice_articolo');
     const lottoInput = row.querySelector('.lotto');
+    const descriptionInput = row.querySelector('.description');
 
     codiceInput.value = ref;
     lottoInput.value = lot;
+
+    // La descrizione compilata a mano non va sovrascritta da una scansione
+    // fatta solo per REF/LOT.
+    if (descriptionInput && description && !descriptionInput.value.trim()) {
+      descriptionInput.value = description;
+    }
 
     if (ref) clearFieldError(codiceInput);
     if (lot) clearFieldError(lottoInput);
