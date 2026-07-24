@@ -59,6 +59,14 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
   disegnata alta non sfonda più la pagina A4 su due pagine.
 
 ### Modificato
+- OCR documento migliorato (`api/ocr.js`): prompt con posizione e diciture reali
+  dell'intestazione sanitaria (Ospedale, P.O., A.O., ASP, ASL, Casa di Cura…), etichette del
+  paziente (Paziente, Paz., Pz., Sig.) con derivazione delle iniziali dal nome esteso, regola
+  "mai la data di nascita" sulla scelta della data. Parser della data tollerante (giorno/mese a
+  una cifra, separatori misti, testo attorno) con rifiuto delle date impossibili; rete di
+  sicurezza privacy che riduce a iniziali un eventuale nome per esteso. Modello aggiornato da
+  `gpt-4.1-mini` a `gpt-5` (reasoning minimo per la latenza), con costante unica per il
+  ripiego su `gpt-4.1`.
 - Documentazione riallineata al backend v3.1: file per documento
   (`Archivio/<Agente>/<Serie>/<Anno>/<Numero>.json`), sincronizzazione incrementale, dati
   locali per agente, firma mittente personale. Aggiornati README, CLAUDE (decisioni e vincoli),
