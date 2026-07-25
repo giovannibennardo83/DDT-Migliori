@@ -1,25 +1,22 @@
 /**
- * DDT-Migliori — backend v3.4
+ * DDT-Migliori — backend v3.5
  * Un file JSON per DDT: Archivio/<Nome Agente>/<SERIE>/<ANNO>/<NUMERO>.json
- * Indice per cartella (_index.json) per una lettura veloce senza scandire i
- * file uno a uno. Nessun servizio avanzato / API da abilitare: solo DriveApp.
- *
- * Sicurezza: se l'indice manca o e' illeggibile, si torna al metodo lento
- * (scansione dei file) e si ricostruisce l'indice. Il caso peggiore e' quindi
- * la velocita' precedente, mai un errore.
+ * Enumerazione cartella con il servizio avanzato Drive API (v3, identificatore
+ * "Drive"): nome + data di tutti i file in una richiesta, ~300ms qualunque sia
+ * il numero di documenti. Se il servizio non fosse disponibile, scansione
+ * classica di riserva: il caso peggiore e' la lentezza, mai un errore.
  */
 
 const ROOT_FOLDER = 'DDT-Migliori';
 const ARCHIVE_FOLDER = 'Archivio';
 const FIRME_FOLDER = 'Firme';
 const USERS_FILE = 'utenti.json';
-const INDEX_FILE = '_index.json';
 const PIN_SALT = 'ddt-migliori-2026';      // non cambiare dopo aver assegnato i PIN
 const SESSION_DAYS = 30;
 const FIRMA_MAX_CHARS = 300000;
 
 function doGet() {
-  return json({ ok: true, servizio: 'DDT-Migliori Backend v3.4' });
+  return json({ ok: true, servizio: 'DDT-Migliori Backend v3.5' });
 }
 
 function doPost(e) {
@@ -38,49 +35,6 @@ function doPost(e) {
   } catch (err) {
     Logger.log('ERRORE: ' + err);
     return json({ ok: false, errore: 'interno', dettaglio: String(err) });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Indice di cartella
-// ---------------------------------------------------------------------------
-
-// { "<numero>": "<ISO ultima modifica>" }. null se assente o illeggibile.
-function leggiIndice(cartella) {
-  const file = trovaFile(cartella, INDEX_FILE);
-  if (!file) return null;
-  const dati = safeParse(file.getBlob().getDataAsString('UTF-8'));
-  return dati && typeof dati === 'object' ? dati : null;
-}
-
-function scriviIndice(cartella, indice) {
-  const file = trovaFile(cartella, INDEX_FILE);
-  const contenuto = JSON.stringify(indice);
-  if (file) file.setContent(contenuto);
-  else cartella.createFile(INDEX_FILE, contenuto, 'application/json');
-}
-
-// Aggiornamento best-effort: un fallimento non deve mai bloccare la scrittura
-// del documento, che e' la fonte di verita'.
-function aggiornaIndice(cartella, numero, iso) {
-  try {
-    const indice = leggiIndice(cartella) || {};
-    indice[numero] = iso;
-    scriviIndice(cartella, indice);
-  } catch (err) {
-    Logger.log('Indice non aggiornato (upsert ' + numero + '): ' + err);
-  }
-}
-
-function rimuoviDaIndice(cartella, numero) {
-  try {
-    const indice = leggiIndice(cartella);
-    if (indice && Object.prototype.hasOwnProperty.call(indice, numero)) {
-      delete indice[numero];
-      scriviIndice(cartella, indice);
-    }
-  } catch (err) {
-    Logger.log('Indice non aggiornato (delete ' + numero + '): ' + err);
   }
 }
 
@@ -105,55 +59,60 @@ function azioneLeggi(body) {
   const adesso = new Date().toISOString();
   const dopo = body.dopo ? new Date(body.dopo) : null;
   const dopoValido = dopo instanceof Date && !isNaN(dopo.getTime()) ? dopo : null;
-  // Solo il proprietario dell'archivio (non l'admin) puo' ricostruirne l'indice.
-  const proprietario = target.codice === utente.codice && utente.ruolo !== 'admin';
 
   const cartella = trovaCartellaAnno(target.nome, controllo.serie, controllo.anno);
   if (!cartella) return { ok: true, elenco: [], documenti: [], adesso: adesso };
 
-  const indice = leggiIndice(cartella);
-
-  // --- Via veloce: l'indice c'e' ---
-  if (indice) {
-    const elenco = Object.keys(indice);
-    const documenti = [];
-    elenco.forEach(function (numero) {
-      if (dopoValido && new Date(indice[numero]) <= dopoValido) return;
-      const f = trovaFile(cartella, numero + '.json');
-      if (!f) return;
-      const doc = safeParse(f.getBlob().getDataAsString('UTF-8'));
-      if (doc && doc.id) documenti.push(doc);
-    });
-    return { ok: true, elenco: elenco, documenti: documenti, adesso: adesso };
-  }
-
-  // --- Via lenta (indice assente): scansione + ricostruzione dell'indice ---
   const elenco = [];
-  const documenti = [];
-  const nuovoIndice = {};
+  const daLeggere = []; // { id } oppure { file }
 
-  const files = cartella.getFiles();
-  while (files.hasNext()) {
-    const file = files.next();
-    const nome = file.getName();
-    if (nome === INDEX_FILE) continue;
-    if (!/\.json$/i.test(nome)) continue;
+  const usaDriveApi = typeof Drive !== 'undefined' && Drive.Files && Drive.Files.list;
 
-    const numero = nome.replace(/\.json$/i, '');
-    elenco.push(numero);
-    const mtime = file.getLastUpdated();
-    nuovoIndice[numero] = mtime.toISOString();
+  if (usaDriveApi) {
+    // Una richiesta paginata per l'intera cartella: nome + data di modifica
+    // di tutti i file insieme. E' la via veloce verificata sul campo.
+    let pageToken = null;
+    do {
+      const risposta = Drive.Files.list({
+        q: "'" + cartella.getId() + "' in parents and trashed = false",
+        fields: 'nextPageToken, files(id, name, modifiedTime)',
+        pageSize: 1000,
+        pageToken: pageToken,
+      });
 
-    if (!dopoValido || mtime > dopoValido) {
-      const doc = safeParse(file.getBlob().getDataAsString('UTF-8'));
-      if (doc && doc.id) documenti.push(doc);
+      (risposta.files || []).forEach(function (f) {
+        if (!/\.json$/i.test(f.name)) return;
+        elenco.push(f.name.replace(/\.json$/i, ''));
+        if (!dopoValido || new Date(f.modifiedTime) > dopoValido) {
+          daLeggere.push({ id: f.id });
+        }
+      });
+
+      pageToken = risposta.nextPageToken;
+    } while (pageToken);
+  } else {
+    // Riserva: scansione file per file (lenta ma sempre disponibile).
+    Logger.log('Drive API non disponibile: uso la scansione classica.');
+    const files = cartella.getFiles();
+    while (files.hasNext()) {
+      const file = files.next();
+      const nome = file.getName();
+      if (!/\.json$/i.test(nome)) continue;
+      elenco.push(nome.replace(/\.json$/i, ''));
+      if (!dopoValido || file.getLastUpdated() > dopoValido) {
+        daLeggere.push({ file: file });
+      }
     }
   }
 
-  if (proprietario) {
-    try { scriviIndice(cartella, nuovoIndice); }
-    catch (err) { Logger.log('Indice non ricostruito: ' + err); }
-  }
+  const documenti = [];
+  daLeggere.forEach(function (item) {
+    const raw = item.id
+      ? DriveApp.getFileById(item.id).getBlob().getDataAsString('UTF-8')
+      : item.file.getBlob().getDataAsString('UTF-8');
+    const doc = safeParse(raw);
+    if (doc && doc.id) documenti.push(doc);
+  });
 
   return { ok: true, elenco: elenco, documenti: documenti, adesso: adesso };
 }
@@ -185,7 +144,6 @@ function azioneUpsert(body) {
     if (esistente) esistente.setContent(contenuto);
     else cartella.createFile(nomeFile, contenuto, 'application/json');
 
-    aggiornaIndice(cartella, numero, new Date().toISOString());
     return { ok: true };
   });
 }
@@ -207,7 +165,6 @@ function azioneDelete(body) {
     if (!file) return { ok: false, errore: 'documento_non_trovato' };
 
     file.setTrashed(true);
-    rimuoviDaIndice(cartella, numero);
     return { ok: true };
   });
 }
@@ -413,44 +370,20 @@ function json(obj) {
 }
 
 // ---------------------------------------------------------------------------
-// Da eseguire UNA VOLTA dall'editor dopo il deploy del v3.4:
-// costruisce l'indice per tutte le cartelle-anno esistenti, cosi' nessun
-// agente paga la prima sincronizzazione lenta. Rieseguirla e' innocuo
-// (riallinea gli indici ai file presenti).
+// Diagnostica: verifica dall'editor che la Drive API risponda.
 // ---------------------------------------------------------------------------
 
-function ricostruisciTuttiGliIndici() {
-  const archivio = trovaSottocartella(rootFolder(), ARCHIVE_FOLDER);
-  if (!archivio) { Logger.log('Nessuna cartella Archivio.'); return; }
+function testDriveApi() {
+  const utente = trovaUtente('GBE');
+  const cartella = trovaCartellaAnno(utente.nome, 'MS', 2026);
+  if (!cartella) { Logger.log('Cartella GBE/MS/2026 non trovata'); return; }
 
-  let cartelleFatte = 0, documentiIndicizzati = 0;
-
-  const agenti = archivio.getFolders();
-  while (agenti.hasNext()) {
-    const agente = agenti.next();
-    const series = agente.getFolders();
-    while (series.hasNext()) {
-      const serie = series.next();
-      const anni = serie.getFolders();
-      while (anni.hasNext()) {
-        const anno = anni.next();
-        const indice = {};
-        const files = anno.getFiles();
-        while (files.hasNext()) {
-          const file = files.next();
-          const nome = file.getName();
-          if (nome === INDEX_FILE || !/\.json$/i.test(nome)) continue;
-          indice[nome.replace(/\.json$/i, '')] = file.getLastUpdated().toISOString();
-          documentiIndicizzati++;
-        }
-        scriviIndice(anno, indice);
-        cartelleFatte++;
-        Logger.log(agente.getName() + '/' + serie.getName() + '/' + anno.getName()
-          + ': ' + Object.keys(indice).length + ' documenti');
-      }
-    }
-  }
-
-  Logger.log('Indici costruiti: ' + cartelleFatte + ' cartelle, '
-    + documentiIndicizzati + ' documenti totali.');
+  const inizio = Date.now();
+  const r = Drive.Files.list({
+    q: "'" + cartella.getId() + "' in parents and trashed = false",
+    fields: 'files(id,name,modifiedTime)',
+    pageSize: 1000,
+  });
+  const files = r.files || [];
+  Logger.log('Drive API OK: ' + files.length + ' file in ' + (Date.now() - inizio) + ' ms');
 }
