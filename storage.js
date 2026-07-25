@@ -251,44 +251,59 @@ const STORAGE = (function () {
       const annoCorrente = new Date().getFullYear();
       const inCoda = new Set(coda().map((o) => (o.ddt ? o.ddt.id : o.id)));
 
+      const partizioni = [];
+      session.utente.serie.forEach((serie) => {
+        [annoCorrente, annoCorrente - 1].forEach((anno) => partizioni.push({ serie, anno }));
+      });
+
+      // Le partizioni sono disgiunte (un documento appartiene a una sola
+      // serie+anno): le letture viaggiano in parallelo e il tempo totale e'
+      // quello della chiamata piu' lenta, non la somma. Un errore di rete su
+      // una partizione non tocca le altre: quella riproverà alla sync dopo,
+      // col suo marcatore fermo.
+      const risposte = await Promise.all(partizioni.map(async ({ serie, anno }) => {
+        const chiave = `${serie}_${anno}`;
+        const payload = { azione: 'leggi', token: session.token, serie, anno };
+        if (ultimaSync[chiave]) payload.dopo = ultimaSync[chiave];
+
+        try {
+          return { serie, anno, chiave, esito: await chiama(payload) };
+        } catch {
+          return { serie, anno, chiave, esito: null };
+        }
+      }));
+
+      if (risposte.some((r) => r.esito && !r.esito.ok && r.esito.errore === 'sessione_non_valida')) {
+        sessioneScaduta();
+        throw new Error('sessione scaduta');
+      }
+
       let docs = localDocs.slice();
 
-      for (const serie of session.utente.serie) {
-        for (const anno of [annoCorrente, annoCorrente - 1]) {
-          const chiave = `${serie}_${anno}`;
-          const payload = { azione: 'leggi', token: session.token, serie, anno };
-          if (ultimaSync[chiave]) payload.dopo = ultimaSync[chiave];
+      for (const { serie, anno, chiave, esito } of risposte) {
+        if (!esito || !esito.ok) continue;
 
-          const esito = await chiama(payload);
+        // Documenti nuovi o modificati sul server.
+        (esito.documenti || []).forEach((remoto) => {
+          if (!remoto || !remoto.id) return;
+          remoto.serie = serie;
+          const indice = docs.findIndex((d) => d.id === remoto.id);
+          if (indice >= 0) docs[indice] = remoto;
+          else docs.push(remoto);
+        });
 
-          if (!esito.ok && esito.errore === 'sessione_non_valida') {
-            sessioneScaduta();
-            throw new Error('sessione scaduta');
-          }
-          if (!esito.ok) continue;
+        // Eliminazioni: un documento locale di questa serie/anno che non
+        // compare piu' nell'elenco remoto (e non e' in coda di invio) e'
+        // stato cancellato altrove.
+        const presenti = new Set(esito.elenco || []);
+        docs = docs.filter((d) => {
+          if ((d.serie || 'MS') !== serie) return true;
+          if (annoDi(d) !== anno) return true;
+          if (inCoda.has(d.id)) return true;
+          return presenti.has(nomeFileDoc(d));
+        });
 
-          // Documenti nuovi o modificati sul server.
-          (esito.documenti || []).forEach((remoto) => {
-            if (!remoto || !remoto.id) return;
-            remoto.serie = serie;
-            const indice = docs.findIndex((d) => d.id === remoto.id);
-            if (indice >= 0) docs[indice] = remoto;
-            else docs.push(remoto);
-          });
-
-          // Eliminazioni: un documento locale di questa serie/anno che non
-          // compare piu' nell'elenco remoto (e non e' in coda di invio) e'
-          // stato cancellato altrove.
-          const presenti = new Set(esito.elenco || []);
-          docs = docs.filter((d) => {
-            if ((d.serie || 'MS') !== serie) return true;
-            if (annoDi(d) !== anno) return true;
-            if (inCoda.has(d.id)) return true;
-            return presenti.has(nomeFileDoc(d));
-          });
-
-          ultimaSync[chiave] = esito.adesso || ultimaSync[chiave];
-        }
+        ultimaSync[chiave] = esito.adesso || ultimaSync[chiave];
       }
 
       localStorage.setItem(chiaveSync, JSON.stringify(ultimaSync));

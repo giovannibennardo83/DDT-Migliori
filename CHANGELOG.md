@@ -59,6 +59,10 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
   disegnata alta non sfonda più la pagina A4 su due pagine.
 
 ### Modificato
+- Sincronizzazione più veloce: le letture delle partizioni (serie × anno) viaggiano **in
+  parallelo** invece che in serie — il tempo di avvio scende al costo della chiamata più lenta
+  (misurato: da ~7,3s a ~3,7s con due partizioni; il beneficio raddoppia per gli utenti a due
+  serie). Un errore su una partizione non tocca le altre.
 - OCR documento migliorato (`api/ocr.js`): prompt con posizione e diciture reali
   dell'intestazione sanitaria (Ospedale, P.O., A.O., ASP, ASL, Casa di Cura…), etichette del
   paziente (Paziente, Paz., Pz., Sig.) con derivazione delle iniziali dal nome esteso, regola
