@@ -1,10 +1,15 @@
 /**
- * DDT-Migliori — backend v3.5
+ * DDT-Migliori — backend v3.7
  * Un file JSON per DDT: Archivio/<Nome Agente>/<SERIE>/<ANNO>/<NUMERO>.json
  * Enumerazione cartella con il servizio avanzato Drive API (v3, identificatore
- * "Drive"): nome + data di tutti i file in una richiesta, ~300ms qualunque sia
- * il numero di documenti. Se il servizio non fosse disponibile, scansione
- * classica di riserva: il caso peggiore e' la lentezza, mai un errore.
+ * "Drive"); scansione classica di riserva se non disponibile.
+ *
+ * "leggi" supporta la prima sync progressiva del client:
+ *   {limite: N}        -> contenuti dei soli N documenti piu' recenti (per numero)
+ *   {numeri: [...]}    -> contenuti dei documenti indicati (recupero in sottofondo)
+ *   {dopo: iso}        -> contenuti dei soli modificati dall'ultima sync
+ *   (nessuno)          -> tutti i contenuti
+ * "elenco" e "adesso" sono sempre completi.
  */
 
 const ROOT_FOLDER = 'DDT-Migliori';
@@ -16,7 +21,7 @@ const SESSION_DAYS = 30;
 const FIRMA_MAX_CHARS = 300000;
 
 function doGet() {
-  return json({ ok: true, servizio: 'DDT-Migliori Backend v3.6' });
+  return json({ ok: true, servizio: 'DDT-Migliori Backend v3.7' });
 }
 
 function doPost(e) {
@@ -63,9 +68,8 @@ function azioneLeggi(body) {
   const cartella = trovaCartellaAnno(target.nome, controllo.serie, controllo.anno);
   if (!cartella) return { ok: true, elenco: [], documenti: [], adesso: adesso };
 
-  const elenco = [];
-  const daLeggere = []; // { id } oppure { file }
-
+  // Enumerazione: nome (senza estensione) + riferimento per la lettura.
+  const voci = []; // { nome, id? , file?, modificato? }
   const usaDriveApi = typeof Drive !== 'undefined' && Drive.Files && Drive.Files.list;
 
   if (usaDriveApi) {
@@ -82,10 +86,7 @@ function azioneLeggi(body) {
 
       (risposta.files || []).forEach(function (f) {
         if (!/\.json$/i.test(f.name)) return;
-        elenco.push(f.name.replace(/\.json$/i, ''));
-        if (!dopoValido || new Date(f.modifiedTime) > dopoValido) {
-          daLeggere.push({ id: f.id });
-        }
+        voci.push({ nome: f.name.replace(/\.json$/i, ''), id: f.id, modificato: new Date(f.modifiedTime) });
       });
 
       pageToken = risposta.nextPageToken;
@@ -98,11 +99,30 @@ function azioneLeggi(body) {
       const file = files.next();
       const nome = file.getName();
       if (!/\.json$/i.test(nome)) continue;
-      elenco.push(nome.replace(/\.json$/i, ''));
-      if (!dopoValido || file.getLastUpdated() > dopoValido) {
-        daLeggere.push({ file: file });
-      }
+      voci.push({ nome: nome.replace(/\.json$/i, ''), file: file, modificato: file.getLastUpdated() });
     }
+  }
+
+  const elenco = voci.map(function (v) { return v.nome; });
+
+  // Selezione dei contenuti da restituire, in ordine di precedenza:
+  // 1. "numeri": documenti specifici (il recupero in sottofondo del client);
+  // 2. "limite" senza "dopo": i piu' recenti per numero (prima sync rapida);
+  // 3. "dopo": i modificati dall'ultima sync (incrementale);
+  // 4. nessun parametro: tutto (prima sync classica).
+  let daLeggere;
+  const limite = Number(body.limite) || 0;
+
+  if (Array.isArray(body.numeri) && body.numeri.length) {
+    const richiesti = {};
+    body.numeri.forEach(function (n) { richiesti[String(n)] = true; });
+    daLeggere = voci.filter(function (v) { return richiesti[v.nome]; });
+  } else if (!dopoValido && limite > 0) {
+    daLeggere = voci.slice().sort(function (a, b) {
+      return b.nome.localeCompare(a.nome);
+    }).slice(0, limite);
+  } else {
+    daLeggere = voci.filter(function (v) { return !dopoValido || v.modificato > dopoValido; });
   }
 
   const documenti = [];
