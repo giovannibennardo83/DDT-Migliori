@@ -59,6 +59,11 @@ e il progetto adotta il [Versionamento Semantico](https://semver.org/lang/it/).
   disegnata alta non sfonda più la pagina A4 su due pagine.
 
 ### Modificato
+- **Prima sincronizzazione progressiva** (backend v3.7): al primo avvio su un dispositivo
+  arrivano subito i 5 documenti più recenti (l'app è usabile in pochi secondi, numerazione già
+  corretta) e il resto dell'archivio scende in sottofondo a blocchi, con ripresa automatica se
+  interrotto. "Ultimi 30", "Tutti" e la ricerca mostrano il popup di attesa finché il recupero
+  non è completo. Misurato sull'archivio reale (45 documenti): app pronta in ~8s invece di ~40.
 - Sincronizzazione più veloce: le letture delle partizioni (serie × anno) viaggiano **in
   parallelo** invece che in serie — il tempo di avvio scende al costo della chiamata più lenta
   (misurato: da ~7,3s a ~3,7s con due partizioni; il beneficio raddoppia per gli utenti a due

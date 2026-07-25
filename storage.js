@@ -4,6 +4,8 @@
 
 const STORAGE = (function () {
   const SESSION_KEY = 'ddtSession';
+  const PRIMA_SYNC_RAPIDA = 5;   // documenti scaricati subito alla prima sync
+  const BACKFILL_BLOCCO = 8;     // documenti per blocco nel recupero in sottofondo
 
   let session = leggiJson(SESSION_KEY);
 
@@ -246,15 +248,25 @@ const STORAGE = (function () {
 
     flushQueue,
 
-    // Sincronizzazione incrementale: per ogni serie abilitata e per anno
-    // corrente e precedente, chiede al backend solo i documenti modificati
-    // dall'ultima sync e riconcilia le eliminazioni tramite l'elenco dei
-    // numeri presenti. Riceve la lista locale e restituisce quella aggiornata.
-    async sincronizza(localDocs) {
+    // Sincronizzazione incrementale con prima sync progressiva.
+    //
+    // Partizione gia' sincronizzata (marcatore presente): chiede i soli
+    // documenti modificati e riconcilia le eliminazioni con l'elenco.
+    //
+    // Prima sync di una partizione: chiede subito i PRIMA_SYNC_RAPIDA
+    // documenti piu' recenti (l'app diventa usabile in pochi secondi) e
+    // recupera i restanti in sottofondo, a blocchi, tramite onAggiornamento.
+    // Il marcatore viene scritto solo a recupero completato: fino ad allora
+    // nessuna eliminazione viene applicata e un'interruzione riprende da
+    // dove era rimasta.
+    async sincronizza(localDocs, onAggiornamento) {
       if (!session) return localDocs;
+      this._onAggiornamento = onAggiornamento || this._onAggiornamento;
 
       const chiaveSync = chiavePerAgente('ddtLastSync');
+      const chiaveBackfill = chiavePerAgente('ddtBackfill');
       const ultimaSync = leggiJson(chiaveSync) || {};
+      const backfill = leggiJson(chiaveBackfill) || {};
       const annoCorrente = new Date().getFullYear();
       const inCoda = new Set(coda().map((o) => (o.ddt ? o.ddt.id : o.id)));
 
@@ -263,15 +275,17 @@ const STORAGE = (function () {
         [annoCorrente, annoCorrente - 1].forEach((anno) => partizioni.push({ serie, anno }));
       });
 
-      // Le partizioni sono disgiunte (un documento appartiene a una sola
-      // serie+anno): le letture viaggiano in parallelo e il tempo totale e'
-      // quello della chiamata piu' lenta, non la somma. Un errore di rete su
-      // una partizione non tocca le altre: quella riproverà alla sync dopo,
-      // col suo marcatore fermo.
+      // Fase rapida, in parallelo: incrementale dove c'e' il marcatore,
+      // "primi N" dove la partizione non e' mai stata sincronizzata. Le
+      // partizioni con un recupero interrotto in sospeso non richiamano il
+      // server qui: riprendono direttamente in sottofondo.
       const risposte = await Promise.all(partizioni.map(async ({ serie, anno }) => {
         const chiave = `${serie}_${anno}`;
+        if (!ultimaSync[chiave] && backfill[chiave]) return { serie, anno, chiave, esito: null, ripresa: true };
+
         const payload = { azione: 'leggi', token: session.token, serie, anno };
         if (ultimaSync[chiave]) payload.dopo = ultimaSync[chiave];
+        else payload.limite = PRIMA_SYNC_RAPIDA;
 
         try {
           return { serie, anno, chiave, esito: await chiama(payload) };
@@ -299,22 +313,102 @@ const STORAGE = (function () {
           else docs.push(remoto);
         });
 
-        // Eliminazioni: un documento locale di questa serie/anno che non
-        // compare piu' nell'elenco remoto (e non e' in coda di invio) e'
-        // stato cancellato altrove.
-        const presenti = new Set(esito.elenco || []);
-        docs = docs.filter((d) => {
-          if ((d.serie || 'MS') !== serie) return true;
-          if (annoDi(d) !== anno) return true;
-          if (inCoda.has(d.id)) return true;
-          return presenti.has(nomeFileDoc(d));
-        });
+        if (ultimaSync[chiave]) {
+          // Incrementale: riconciliazione completa delle eliminazioni.
+          const presenti = new Set(esito.elenco || []);
+          docs = docs.filter((d) => {
+            if ((d.serie || 'MS') !== serie) return true;
+            if (annoDi(d) !== anno) return true;
+            if (inCoda.has(d.id)) return true;
+            return presenti.has(nomeFileDoc(d));
+          });
+          ultimaSync[chiave] = esito.adesso || ultimaSync[chiave];
+        } else {
+          // Prima sync: cosa manca ancora rispetto all'elenco completo?
+          const presentiLocali = new Set(
+            docs.filter((d) => (d.serie || 'MS') === serie && annoDi(d) === anno)
+              .map((d) => nomeFileDoc(d)));
+          const mancanti = (esito.elenco || []).filter((n) => !presentiLocali.has(n));
 
-        ultimaSync[chiave] = esito.adesso || ultimaSync[chiave];
+          if (mancanti.length === 0) {
+            ultimaSync[chiave] = esito.adesso; // gia' completa
+          } else {
+            backfill[chiave] = { adesso: esito.adesso, numeri: mancanti };
+          }
+        }
       }
 
       localStorage.setItem(chiaveSync, JSON.stringify(ultimaSync));
+      localStorage.setItem(chiaveBackfill, JSON.stringify(backfill));
+
+      // Recupero in sottofondo del resto dell'archivio, non atteso qui.
+      if (Object.keys(backfill).some((k) => backfill[k])) {
+        this._backfillPromise = this._eseguiBackfill(onAggiornamento)
+          .catch((err) => console.error('Backfill interrotto:', err))
+          .finally(() => { this._backfillPromise = null; });
+      }
+
       return docs;
+    },
+
+    // Scarica a blocchi i documenti rimasti della prima sync. Ogni blocco
+    // viene consegnato via onAggiornamento (l'app salva e ridisegna) e lo
+    // stato persiste: un'interruzione riprende dal blocco successivo.
+    async _eseguiBackfill(onAggiornamento) {
+      const chiaveSync = chiavePerAgente('ddtLastSync');
+      const chiaveBackfill = chiavePerAgente('ddtBackfill');
+
+      while (session) {
+        const backfill = leggiJson(chiaveBackfill) || {};
+        const chiave = Object.keys(backfill).find((k) => backfill[k]);
+        if (!chiave) break;
+
+        const [serie, annoStr] = chiave.split('_');
+        const stato = backfill[chiave];
+        const blocco = stato.numeri.slice(0, BACKFILL_BLOCCO);
+
+        if (blocco.length > 0) {
+          const esito = await chiama({
+            azione: 'leggi', token: session.token, serie, anno: Number(annoStr), numeri: blocco,
+          });
+
+          if (!esito.ok && esito.errore === 'sessione_non_valida') { sessioneScaduta(); return; }
+          if (!esito.ok) throw new Error(esito.errore || 'backfill fallito');
+
+          if (onAggiornamento) onAggiornamento(esito.documenti || [], serie);
+        }
+
+        // Stato riletto e riscritto solo ora: se il blocco fallisce prima,
+        // nulla e' consumato e si riprovera' da qui.
+        const aggiornato = leggiJson(chiaveBackfill) || {};
+        if (aggiornato[chiave]) {
+          aggiornato[chiave].numeri = aggiornato[chiave].numeri.filter((n) => !blocco.includes(n));
+
+          if (aggiornato[chiave].numeri.length === 0) {
+            const ultimaSync = leggiJson(chiaveSync) || {};
+            ultimaSync[chiave] = aggiornato[chiave].adesso;
+            localStorage.setItem(chiaveSync, JSON.stringify(ultimaSync));
+            delete aggiornato[chiave];
+          }
+          localStorage.setItem(chiaveBackfill, JSON.stringify(aggiornato));
+        }
+      }
+    },
+
+    backfillInCorso() {
+      const backfill = leggiJson(chiavePerAgente('ddtBackfill')) || {};
+      return Object.keys(backfill).some((k) => backfill[k]);
+    },
+
+    // Attende la fine del recupero in sottofondo (per "Tutti" e ricerca).
+    // Se il recupero era rimasto in sospeso e non e' attivo, lo riavvia.
+    async attendiBackfill() {
+      if (!this._backfillPromise && session && this.backfillInCorso()) {
+        this._backfillPromise = this._eseguiBackfill(this._onAggiornamento)
+          .catch((err) => console.error('Backfill interrotto:', err))
+          .finally(() => { this._backfillPromise = null; });
+      }
+      if (this._backfillPromise) await this._backfillPromise;
     },
   };
 })();

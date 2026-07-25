@@ -544,6 +544,32 @@ function saveAndPrint(ddt) {
   }
 }
 
+// Consegna dei blocchi del recupero in sottofondo (prima sync progressiva):
+// ogni blocco si aggiunge ai documenti locali e la lista si allunga man mano.
+function applicaBloccoBackfill(blocco, serie) {
+  const attuali = getDDTs();
+
+  (blocco || []).forEach((remoto) => {
+    if (!remoto || !remoto.id) return;
+    remoto.serie = serie;
+    const indice = attuali.findIndex((d) => d.id === remoto.id);
+    if (indice >= 0) attuali[indice] = remoto;
+    else attuali.push(remoto);
+  });
+
+  saveDDTs(attuali);
+  render(attuali);
+}
+
+// "Ultimi 30", "Tutti" e la ricerca hanno bisogno dell'archivio completo:
+// se il recupero in sottofondo e' ancora in corso, popup finche' non finisce.
+async function attendiArchivioCompleto() {
+  if (!STORAGE.backfillInCorso()) return;
+  showSaveToast('Caricamento archivio completo…', 'pending');
+  await STORAGE.attendiBackfill();
+  hideSaveToast();
+}
+
 async function syncDDT(mostraAttesa = false) {
   if (!navigator.onLine) return;
   if (!STORAGE.sessioneAttiva()) return;
@@ -561,7 +587,7 @@ async function syncDDT(mostraAttesa = false) {
     // poi la riconciliazione incrementale con gli archivi remoti.
     await STORAGE.flushQueue();
 
-    const finalDDT = await STORAGE.sincronizza(await getAllDDT());
+    const finalDDT = await STORAGE.sincronizza(await getAllDDT(), applicaBloccoBackfill);
     console.log('SYNC: documenti dopo riconciliazione:', finalDDT.length);
 
     await saveAllDDT(finalDDT);
@@ -845,10 +871,14 @@ function caricaVistaArchivio() {
   aggiornaChipsArchivio();
 }
 
-function impostaLimiteArchivio(limite) {
+async function impostaLimiteArchivio(limite) {
   archivioLimite = limite === 'tutti' ? 'tutti' : Number(limite) || 5;
   localStorage.setItem(chiaveVistaArchivio(), String(archivioLimite));
   aggiornaChipsArchivio();
+
+  // Oltre gli ultimi 5 serve l'archivio completo.
+  if (archivioLimite !== 5) await attendiArchivioCompleto();
+
   render(getDDTs());
 }
 
@@ -857,7 +887,10 @@ archivioChips.forEach((chip) => {
 });
 
 if (archivioCerca) {
-  archivioCerca.addEventListener('input', () => render(getDDTs()));
+  archivioCerca.addEventListener('input', async () => {
+    if (archivioCerca.value.trim()) await attendiArchivioCompleto();
+    render(getDDTs());
+  });
 }
 
 function render(ddts) {
