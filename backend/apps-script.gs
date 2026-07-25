@@ -16,7 +16,7 @@ const SESSION_DAYS = 30;
 const FIRMA_MAX_CHARS = 300000;
 
 function doGet() {
-  return json({ ok: true, servizio: 'DDT-Migliori Backend v3.5' });
+  return json({ ok: true, servizio: 'DDT-Migliori Backend v3.6' });
 }
 
 function doPost(e) {
@@ -274,7 +274,16 @@ function azioneLogin(body) {
   return {
     ok: true,
     token: token,
-    utente: { codice: utente.codice, nome: utente.nome, serie: utente.serie, ruolo: utente.ruolo || 'agente' },
+    utente: {
+      codice: utente.codice,
+      nome: utente.nome,
+      serie: utente.serie,
+      ruolo: utente.ruolo || 'agente',
+      // Pavimento della numerazione per la transizione dalla carta:
+      // { "MS_2026": 67 } = ultimo numero cartaceo, il digitale parte da 68.
+      // Assente o vuoto = numerazione da 001 come sempre.
+      progressivoIniziale: utente.progressivoIniziale || {},
+    },
     serieInfo: leggiUtentiFile().serie,
     firma: leggiFirma(utente.codice),
   };

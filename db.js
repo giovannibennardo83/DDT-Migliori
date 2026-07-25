@@ -135,7 +135,12 @@ async function getNextDDTNumber(dateString) {
 
   const all = await getAllDDT();
 
-  let max = 0;
+  // Pavimento per la transizione dalla carta: l'ultimo numero del blocchetto
+  // cartaceo, configurato per serie e anno. Il progressivo digitale non puo'
+  // scendere sotto questa soglia; assente = 0, comportamento storico.
+  const data = dateString ? new Date(dateString) : new Date();
+  const annoPieno = Number.isNaN(data.getTime()) ? new Date().getFullYear() : data.getFullYear();
+  let max = STORAGE.progressivoIniziale(serie, annoPieno);
 
   // Il progressivo e' locale all'archivio: si contano solo i DDT
   // della serie attiva, per l'anno del documento.

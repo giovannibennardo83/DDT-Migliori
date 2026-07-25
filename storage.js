@@ -159,6 +159,13 @@ const STORAGE = (function () {
       return session ? session.firma || null : null;
     },
 
+    // Ultimo numero cartaceo per serie e anno (es. chiave "MS_2026"):
+    // la numerazione digitale riparte dal successivo. 0 se non configurato.
+    progressivoIniziale(serie, anno) {
+      const mappa = session?.utente?.progressivoIniziale;
+      return mappa ? Number(mappa[`${serie}_${anno}`]) || 0 : 0;
+    },
+
     // Salva (o rimuove, con immagine vuota) la firma mittente dell'agente.
     async salvaFirma(immagine) {
       if (!session) return { ok: false, errore: 'sessione_non_valida' };

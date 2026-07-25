@@ -490,6 +490,23 @@ function resetFormState() {
   addRiga();
   temporaryFirmaImage = null;
   updateFirmaPreview();
+  aggiornaAnteprimaNumero();
+}
+
+// Mostra nel campo numero quale sara' il prossimo assegnato: rende visibile
+// a colpo d'occhio l'effetto del progressivo iniziale (transizione dalla
+// carta) e della serie attiva.
+async function aggiornaAnteprimaNumero() {
+  if (!numeroInput || !STORAGE.sessioneAttiva()) return;
+
+  try {
+    const prossimo = await getNextDDTNumber();
+    if (!numeroInput.value) {
+      numeroInput.placeholder = `Assegnato al salvataggio (prossimo: ${prossimo})`;
+    }
+  } catch (err) {
+    console.error('Anteprima numero non disponibile:', err);
+  }
 }
 
 function loadInForm(ddt, index) {
@@ -550,6 +567,7 @@ async function syncDDT(mostraAttesa = false) {
     await saveAllDDT(finalDDT);
     await updateCountersFromDDT(finalDDT);
     render(finalDDT);
+    aggiornaAnteprimaNumero();
     console.log('SYNC OK');
     if (mostraAttesa) hideSaveToast();
   } catch (err) {
@@ -1320,6 +1338,7 @@ if (serieSelect) {
   serieSelect.addEventListener('change', () => {
     STORAGE.setSerieAttiva(serieSelect.value);
     render(getDDTs());
+    aggiornaAnteprimaNumero();
   });
 }
 
