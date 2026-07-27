@@ -133,6 +133,17 @@
         </div>
         <p id="ocr-status" class="ocr-status" aria-live="polite"></p>
         <img id="ocr-preview" class="ocr-preview" alt="Anteprima immagine compressa per OCR" hidden />
+        <div id="ocr-conferma" class="ocr-conferma" hidden>
+          <p class="ocr-conferma-testo">
+            Controlla l'anteprima: il documento deve essere <strong>dritto, in verticale</strong>.
+            Se è ruotato, usa "Ruota" prima di avviare la lettura.
+          </p>
+          <div class="ocr-actions">
+            <button type="button" id="ocr-ruota-btn" class="secondary">↻ Ruota</button>
+            <button type="button" id="ocr-avvia-btn">Avvia lettura</button>
+            <button type="button" id="ocr-annulla-btn" class="secondary">Annulla</button>
+          </div>
+        </div>
         <input
           type="file"
           id="ocr-input-camera"

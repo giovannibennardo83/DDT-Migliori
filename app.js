@@ -867,6 +867,25 @@ async function handleOcrFileChange(event) {
   }
 }
 
+// Foto del documento in attesa di conferma: l'utente puo' raddrizzarla
+// con "Ruota" prima di avviare la lettura (il verso giusto e' deterministico,
+// i tentativi automatici restano solo come rete di sicurezza).
+let scaricoInAttesa = null;
+
+const ocrConferma = document.getElementById('ocr-conferma');
+const ocrRuotaButton = document.getElementById('ocr-ruota-btn');
+const ocrAvviaButton = document.getElementById('ocr-avvia-btn');
+const ocrAnnullaButton = document.getElementById('ocr-annulla-btn');
+
+function chiudiConfermaScarico() {
+  scaricoInAttesa = null;
+  if (ocrConferma) ocrConferma.hidden = true;
+  if (ocrPreview) {
+    ocrPreview.hidden = true;
+    ocrPreview.removeAttribute('src');
+  }
+}
+
 async function handleOcrScaricoFileChange(event) {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -874,10 +893,43 @@ async function handleOcrScaricoFileChange(event) {
   try {
     setOcrStatus('Compressione immagine in corso...');
     const { imageBase64, previewUrl } = await compressImage(file, MAX_LONG_SIDE_DOCUMENTO);
+
+    scaricoInAttesa = imageBase64;
     if (ocrPreview) {
       ocrPreview.src = previewUrl;
       ocrPreview.hidden = false;
     }
+    if (ocrConferma) ocrConferma.hidden = false;
+    setOcrStatus('');
+  } catch (error) {
+    console.error('Errore preparazione foto documento:', error);
+    chiudiConfermaScarico();
+    setOcrStatus('');
+    alert('Impossibile leggere la foto. Riprovare.');
+  } finally {
+    if (ocrScaricoInputCamera) ocrScaricoInputCamera.value = '';
+    if (ocrScaricoInputGallery) ocrScaricoInputGallery.value = '';
+  }
+}
+
+async function ruotaFotoScarico() {
+  if (!scaricoInAttesa) return;
+  try {
+    scaricoInAttesa = await ruotaBase64(scaricoInAttesa, 90);
+    if (ocrPreview) ocrPreview.src = 'data:image/jpeg;base64,' + scaricoInAttesa;
+  } catch (error) {
+    console.error('Rotazione fallita:', error);
+  }
+}
+
+async function avviaOcrScarico() {
+  if (!scaricoInAttesa) return;
+  const imageBase64 = scaricoInAttesa;
+
+  if (ocrConferma) ocrConferma.hidden = true;
+  scaricoInAttesa = null;
+
+  try {
     setOcrStatus('OCR in corso...');
     const result = await ocrConRotazioni(imageBase64, 'document',
       (r) => !(r?.righe || []).length && !String(r?.cliente || '').trim() && !String(r?.data || '').trim());
@@ -1148,6 +1200,9 @@ if (ocrScaricoButton) ocrScaricoButton.addEventListener('click', () => startOcrS
 if (ocrScaricoGalleryButton) ocrScaricoGalleryButton.addEventListener('click', () => startOcrScaricoDocumento('gallery'));
 if (ocrScaricoInputCamera) ocrScaricoInputCamera.addEventListener('change', handleOcrScaricoFileChange);
 if (ocrScaricoInputGallery) ocrScaricoInputGallery.addEventListener('change', handleOcrScaricoFileChange);
+if (ocrRuotaButton) ocrRuotaButton.addEventListener('click', ruotaFotoScarico);
+if (ocrAvviaButton) ocrAvviaButton.addEventListener('click', avviaOcrScarico);
+if (ocrAnnullaButton) ocrAnnullaButton.addEventListener('click', chiudiConfermaScarico);
 
 [clienteRiga1Input, causaleInput].forEach((input) => {
   input.addEventListener('input', () => clearSimpleFieldError(input));

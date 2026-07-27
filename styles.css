@@ -482,3 +482,21 @@ body.login-attivo { overflow: hidden; }
   transform: translate(-50%, -50%);
   background: #0f172a;
 }
+
+/* --- Conferma foto documento: anteprima + rotazione manuale --- */
+
+.ocr-conferma {
+  margin-top: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid #93c5fd;
+  border-radius: 10px;
+  background: #eff6ff;
+}
+
+.ocr-conferma[hidden] { display: none; }
+
+.ocr-conferma-testo {
+  margin: 0 0 0.6rem;
+  font-size: 0.88rem;
+  color: #1e40af;
+}
