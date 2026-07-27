@@ -111,6 +111,17 @@ ricerca per cliente e per agente, ristampa PDF dal JSON, export dati.
 Deploy della PWA su Vercel, repository GitHub reso privato, consolidamento e distribuzione dei
 PIN iniziali agli agenti.
 
+### ◇ M13 (opzione futura, non pianificata) — Backend su database ospitato
+Valutata a luglio 2026 e **rimandata deliberatamente**. Il costo fisso di ~3-5s per chiamata è
+intrinseco ad Apps Script + Drive; un backend su funzioni serverless + database ospitato
+(Turso/Cloudflare D1 — SQLite servito — o Supabase) lo porterebbe a ~100-300ms. È però la
+revisione architetturale piena: riscrittura del backend, porting di autenticazione e sessioni,
+migrazione dei dati, perdita dell'archivio leggibile su Drive col suo cestino. **Condizione di
+attivazione**: dopo il rilascio ai 20 agenti, se l'uso reale dimostrerà che la latenza attuale
+è un problema sentito (l'app non blocca mai sull'attesa: apertura sui dati locali istantanea,
+sync in sottofondo). SQLite puro come file su Drive è invece escluso in ogni scenario:
+riporterebbe alla sovrascrittura integrale con scrittore unico.
+
 ---
 
 ## Evoluzioni post-baseline (luglio 2026)
