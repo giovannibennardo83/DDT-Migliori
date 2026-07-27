@@ -608,6 +608,9 @@ async function syncDDT(mostraAttesa = false) {
 
 const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/tiff', 'image/heic', 'image/heif']);
 const MAX_LONG_SIDE = 1600;
+// Il documento di scarico e' un A4 pieno di bollini piccoli: serve piu'
+// risoluzione dell'etichetta singola, o il testo ruotato diventa illeggibile.
+const MAX_LONG_SIDE_DOCUMENTO = 2200;
 
 function setOcrStatus(message) {
   if (ocrStatus) ocrStatus.textContent = message || '';
@@ -619,7 +622,7 @@ function validateImageFile(file) {
   if (!isKnown && file.type) throw new Error(`Formato non supportato: ${file.type}`);
 }
 
-async function compressImage(file) {
+async function compressImage(file, maxLato = MAX_LONG_SIDE) {
   validateImageFile(file);
   const quality = file.size > 5 * 1024 * 1024 ? 0.6 : file.size > 2 * 1024 * 1024 ? 0.7 : 0.8;
   const reader = new FileReader();
@@ -640,8 +643,8 @@ async function compressImage(file) {
   let width = img.width;
   let height = img.height;
   const longSide = Math.max(width, height);
-  if (longSide > MAX_LONG_SIDE) {
-    const ratio = MAX_LONG_SIDE / longSide;
+  if (longSide > maxLato) {
+    const ratio = maxLato / longSide;
     width = Math.round(width * ratio);
     height = Math.round(height * ratio);
   }
@@ -658,6 +661,73 @@ async function compressImage(file) {
     previewUrl: compressedDataUrl,
     imageBase64: compressedDataUrl.split(',')[1],
   };
+}
+
+// Ruota un'immagine base64 (JPEG) di 90/180/270 gradi in senso orario.
+async function ruotaBase64(imageBase64, gradi) {
+  const img = new Image();
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = () => reject(new Error('Rotazione immagine fallita.'));
+    img.src = 'data:image/jpeg;base64,' + imageBase64;
+  });
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  if (gradi === 180) {
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.translate(img.width, img.height);
+    ctx.rotate(Math.PI);
+  } else {
+    canvas.width = img.height;
+    canvas.height = img.width;
+    if (gradi === 90) {
+      ctx.translate(img.height, 0);
+      ctx.rotate(Math.PI / 2);
+    } else {
+      ctx.translate(0, img.width);
+      ctx.rotate(-Math.PI / 2);
+    }
+  }
+
+  ctx.drawImage(img, 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+}
+
+// Una singola chiamata OCR: null se il server o il modello falliscono
+// (l'errore non e' definitivo, si puo' ritentare con la foto ruotata).
+async function tentaOcr(imageBase64, mode) {
+  try {
+    const body = mode ? { imageBase64, mode } : { imageBase64 };
+    const response = await fetch(OCR_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (err) {
+    console.error('Tentativo OCR fallito:', err);
+    return null;
+  }
+}
+
+// Le foto arrivano spesso ruotate di 90 gradi (documento in orizzontale,
+// telefono in verticale): se il primo tentativo non cava nulla, si riprova
+// con l'immagine ruotata prima di arrendersi.
+async function ocrConRotazioni(imageBase64, mode, risultatoVuoto) {
+  const tentativi = [0, 90, 270];
+
+  for (const gradi of tentativi) {
+    if (gradi !== 0) setOcrStatus(`Foto forse ruotata: riprovo (${gradi}°)...`);
+    const base = gradi === 0 ? imageBase64 : await ruotaBase64(imageBase64, gradi);
+    const result = await tentaOcr(base, mode);
+    if (result && !risultatoVuoto(result)) return result;
+  }
+
+  return null;
 }
 
 function startOcrForRow(row, source = 'camera') {
@@ -760,19 +830,9 @@ async function handleOcrFileChange(event) {
       ocrPreview.hidden = false;
     }
     setOcrStatus('OCR in corso...');
-    const response = await fetch(OCR_URL, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json"
-  },    
-  body: JSON.stringify({ imageBase64 }),
-  });
+    const result = await ocrConRotazioni(imageBase64, null,
+      (r) => !String(r?.ref || '').trim() && !String(r?.lot || '').trim());
 
-    if (!response.ok) {
-      throw new Error(`OCR HTTP ${response.status}`);
-    }
-
-    const result = await response.json();
     const ref = String(result?.ref || '').trim();
     const lot = String(result?.lot || '').trim();
     const description = String(result?.description || '').trim();
@@ -813,28 +873,18 @@ async function handleOcrScaricoFileChange(event) {
 
   try {
     setOcrStatus('Compressione immagine in corso...');
-    const { imageBase64, previewUrl } = await compressImage(file);
+    const { imageBase64, previewUrl } = await compressImage(file, MAX_LONG_SIDE_DOCUMENTO);
     if (ocrPreview) {
       ocrPreview.src = previewUrl;
       ocrPreview.hidden = false;
     }
     setOcrStatus('OCR in corso...');
-    const response = await fetch(OCR_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        imageBase64,
-        mode: 'document',
-      }),
-    });
+    const result = await ocrConRotazioni(imageBase64, 'document',
+      (r) => !(r?.righe || []).length && !String(r?.cliente || '').trim() && !String(r?.data || '').trim());
 
-    if (!response.ok) {
-      throw new Error(`OCR HTTP ${response.status}`);
+    if (!result) {
+      throw new Error('Nessun tentativo OCR riuscito');
     }
-
-    const result = await response.json();
     applyScaricoDataToForm(result);
   } catch (error) {
     console.error('Errore OCR scarico documento:', error);
