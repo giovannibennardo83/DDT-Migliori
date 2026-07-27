@@ -613,7 +613,17 @@ const MAX_LONG_SIDE = 1600;
 const MAX_LONG_SIDE_DOCUMENTO = 2600;
 
 function setOcrStatus(message) {
-  if (ocrStatus) ocrStatus.textContent = message || '';
+  if (!ocrStatus) return;
+
+  if (!message) {
+    ocrStatus.textContent = '';
+    return;
+  }
+
+  // Rotellina sempre accanto al messaggio: rende visibile che l'OCR sta
+  // lavorando anche quando l'attesa dura decine di secondi.
+  ocrStatus.innerHTML = '<span class="ocr-spinner" aria-hidden="true"></span>';
+  ocrStatus.append(message);
 }
 
 function validateImageFile(file) {

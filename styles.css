@@ -500,3 +500,16 @@ body.login-attivo { overflow: hidden; }
   font-size: 0.88rem;
   color: #1e40af;
 }
+
+/* Rotellina dello stato OCR: variante scura per fondo chiaro. */
+.ocr-spinner {
+  display: inline-block;
+  width: 0.95em;
+  height: 0.95em;
+  border: 2px solid rgb(51 65 85 / 30%);
+  border-top-color: #334155;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -0.15em;
+  margin-right: 0.45rem;
+}
