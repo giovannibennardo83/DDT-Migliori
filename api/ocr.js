@@ -76,12 +76,15 @@ ORIENTAMENTO — leggi con attenzione:
 - Se non trovi nessuna data, usa "".
 
 3. PAZIENTE -> campo "iniziali_paziente"
-- Etichette possibili: Paziente, Paz., Pz., Sig., Sig.ra, Nome, Cognome,
-  Iniziali. Spesso scritto a mano.
+- Etichette possibili: Iniziali Paziente, Paziente, Paz., Pz., Sig., Sig.ra,
+  Nome, Cognome. Quasi sempre SCRITTO A MANO, spesso con tratto leggero:
+  guarda con molta attenzione lo spazio subito dopo la dicitura.
 - Se trovi il nome per esteso NON riportarlo: restituisci SOLO le iniziali
   (prima lettera di nome e cognome). Es. "Mario Rossi" -> "M.R."
-- Se trovi gia' delle iniziali (es. "M.R.", "MR"), riportale cosi' come sono.
-- Se assente, usa "".
+- Se trovi gia' delle iniziali (es. "M.R.", "MR", "R.S."), riportale cosi'.
+- NON confondere il paziente con il "Medico Operatore" (anche lui scritto a
+  mano, in un campo vicino): il medico NON va mai riportato.
+- Se davvero illeggibile o assente, usa "".
 
 4. CARTELLA CLINICA -> campo "cartella_clinica"
 - Etichette possibili: Cartella, Cartella clinica, C.C., CC, N. cartella,
@@ -89,11 +92,18 @@ ORIENTAMENTO — leggi con attenzione:
 - Se assente, usa "".
 
 5. DISPOSITIVI -> campo "righe" (una riga per etichetta dispositivo)
+- PROCEDI IN DUE PASSI. Primo: CONTA quanti bollini adesivi ci sono nel
+  foglio (riquadri bianchi con codice a barre e logo del produttore),
+  esaminando TUTTO il foglio: bordi, angoli, bollini ruotati o storti,
+  parzialmente sovrapposti. Secondo: estrai una riga per CIASCUN bollino
+  contato. Il numero di righe deve corrispondere al conteggio (salvo
+  bollini con stesso REF+LOT, che diventano una riga con la quantita'
+  sommata). Se un bollino e' troppo rovinato, mettilo comunque con i campi
+  che riesci a leggere.
 - Per ogni etichetta: REF (codice articolo), LOT (lotto), description.
 - Description: breve (2-4 parole), la parte piu' importante e leggibile;
   se presente una misura utile (es. 71mm, 60mm, 10mm), includila.
 - Ignora UDI, barcode, GTIN, EDI, indirizzi, materiali e codici lunghi.
-- Se stesso REF + LOT compare piu' volte, NON duplicare: somma le quantita'.
 - Se il lotto manca, usa stringa vuota.
 
 Rispondi SOLO con JSON valido in questo formato:
@@ -184,17 +194,21 @@ Rispondi SOLO JSON valido:
             { type: "input_text", text: prompt },
             {
               type: "input_image",
-              image_url: "data:image/jpeg;base64," + imageBase64
+              image_url: "data:image/jpeg;base64," + imageBase64,
+              // Analisi alla massima risoluzione: senza, il modello puo'
+              // sottocampionare il foglio e perdere i bollini piccoli.
+              detail: "high"
             }
           ]
         }
       ]
     };
 
-    // I modelli gpt-5 ragionano prima di rispondere: per l'OCR basta lo
-    // sforzo minimo, che tiene bassa la latenza sul campo.
+    // gpt-5 ragiona prima di rispondere: sul documento denso di bollini
+    // serve piu' profondita' (medium); sull'etichetta singola basta il
+    // minimo, che tiene bassa la latenza.
     if (OCR_MODEL.startsWith("gpt-5")) {
-      richiesta.reasoning = { effort: "low" };
+      richiesta.reasoning = { effort: isDocumentMode ? "medium" : "low" };
     }
 
     const response = await openai.responses.create(richiesta);

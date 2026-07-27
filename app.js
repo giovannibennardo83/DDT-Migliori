@@ -610,7 +610,7 @@ const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 
 const MAX_LONG_SIDE = 1600;
 // Il documento di scarico e' un A4 pieno di bollini piccoli: serve piu'
 // risoluzione dell'etichetta singola, o il testo ruotato diventa illeggibile.
-const MAX_LONG_SIDE_DOCUMENTO = 2200;
+const MAX_LONG_SIDE_DOCUMENTO = 2600;
 
 function setOcrStatus(message) {
   if (ocrStatus) ocrStatus.textContent = message || '';
