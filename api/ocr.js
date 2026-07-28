@@ -204,11 +204,11 @@ Rispondi SOLO JSON valido:
       ]
     };
 
-    // gpt-5 ragiona prima di rispondere: sul documento denso di bollini
-    // serve piu' profondita' (medium); sull'etichetta singola basta il
-    // minimo, che tiene bassa la latenza.
+    // gpt-5 ragiona prima di rispondere: "low" e' il compromesso misurato
+    // sul campo — "medium" aggiungeva ~15s a scansione per un guadagno di
+    // accuratezza non percepibile (il lavoro grosso lo fa detail: high).
     if (OCR_MODEL.startsWith("gpt-5")) {
-      richiesta.reasoning = { effort: isDocumentMode ? "medium" : "low" };
+      richiesta.reasoning = { effort: "low" };
     }
 
     const response = await openai.responses.create(richiesta);
