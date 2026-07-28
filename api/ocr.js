@@ -8,6 +8,7 @@ const OCR_MODEL = "gpt-5";
 // Il body puo' chiedere un modello alternativo tra quelli ammessi:
 // serve per confrontare velocita'/accuratezza senza rideployare.
 const MODELLI_AMMESSI = new Set(["gpt-5", "gpt-5-mini"]);
+const SFORZI_AMMESSI = new Set(["minimal", "low", "medium"]);
 
 export default async function handler(req, res) {
 
@@ -214,7 +215,8 @@ Rispondi SOLO JSON valido:
     // sul campo — "medium" aggiungeva ~15s a scansione per un guadagno di
     // accuratezza non percepibile (il lavoro grosso lo fa detail: high).
     if (modello.startsWith("gpt-5")) {
-      richiesta.reasoning = { effort: "low" };
+      const sforzo = SFORZI_AMMESSI.has(req.body?.sforzo) ? req.body.sforzo : "low";
+      richiesta.reasoning = { effort: sforzo };
     }
 
     const response = await openai.responses.create(richiesta);
