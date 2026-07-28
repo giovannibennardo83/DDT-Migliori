@@ -5,6 +5,10 @@ import OpenAI from "openai";
 // su "gpt-4.1" cambiando solo questa costante.
 const OCR_MODEL = "gpt-5";
 
+// Il body puo' chiedere un modello alternativo tra quelli ammessi:
+// serve per confrontare velocita'/accuratezza senza rideployare.
+const MODELLI_AMMESSI = new Set(["gpt-5", "gpt-5-mini"]);
+
 export default async function handler(req, res) {
 
   // CORS headers
@@ -185,8 +189,10 @@ Rispondi SOLO JSON valido:
 }
 `;
 
+    const modello = MODELLI_AMMESSI.has(req.body?.modello) ? req.body.modello : OCR_MODEL;
+
     const richiesta = {
-      model: OCR_MODEL,
+      model: modello,
       input: [
         {
           role: "user",
@@ -207,7 +213,7 @@ Rispondi SOLO JSON valido:
     // gpt-5 ragiona prima di rispondere: "low" e' il compromesso misurato
     // sul campo — "medium" aggiungeva ~15s a scansione per un guadagno di
     // accuratezza non percepibile (il lavoro grosso lo fa detail: high).
-    if (OCR_MODEL.startsWith("gpt-5")) {
+    if (modello.startsWith("gpt-5")) {
       richiesta.reasoning = { effort: "low" };
     }
 
