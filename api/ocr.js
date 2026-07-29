@@ -37,81 +37,30 @@ export default async function handler(req, res) {
 
     const prompt = isDocumentMode
       ? `
-Analizza questo documento di scarico sala operatoria (foto, con parti
-stampate e parti scritte a mano). Estrai SOLO i campi indicati.
+Analizza questo documento di scarico sala operatoria.
 
-ORIENTAMENTO — leggi con attenzione:
-- La foto puo' essere RUOTATA di 90, 180 o 270 gradi: se il testo appare
-  in verticale o capovolto, ruota mentalmente l'immagine e leggila comunque.
-- I bollini dei dispositivi sono etichette adesive incollate sul foglio in
-  orientamenti DIVERSI tra loro (dritti, ruotati di 90 gradi, storti):
-  esamina OGNI bollino nel SUO orientamento, uno per uno. Non fermarti ai
-  primi: contali e leggili tutti.
-- NON dichiarare il documento illeggibile se una parte si legge: restituisci
-  sempre tutti i campi che riesci a estrarre, e "" solo per quelli davvero
-  illeggibili.
+Regole OCR:
+- Estrai intestazione ospedale/struttura come "cliente"
+- Estrai la data ESATTAMENTE come appare nel documento
+- Le date nei documenti italiani sono SEMPRE: DD/MM/YY oppure DD/MM/YYYY
+- NON reinterpretare il formato
+- NON convertire la data
+- Restituisci la stringa originale letta dal documento
+- Estrai iniziali paziente come "iniziali_paziente"
+- Estrai numero cartella clinica (CC o SDO) come "cartella_clinica"
+- Estrai tutte le etichette dispositivi come righe con REF, LOT e description
+- Description: breve (2-4 parole), scegli la parte più importante e leggibile
+- Se presente una misura utile (es. 71mm, 60mm, 10mm), includila nella description
+- Ignora UDI, barcode, GTIN, EDI, indirizzi, materiali e codici lunghi
+- Se stesso REF + LOT compare più volte, NON duplicare: somma le quantità
+- Se lotto manca, usa stringa vuota
+- Gestisci anche foto inclinate
 
-1. STRUTTURA SANITARIA -> campo "cliente"
-- E' l'intestazione del documento: quasi sempre IN ALTO, nell'angolo destro o
-  sinistro (a volte centrata), anche su piu' righe o dentro un logo.
-- Cerca diciture come: Ospedale, Presidio Ospedaliero, P.O., Azienda
-  Ospedaliera, A.O., A.O.U., ASP, Azienda Sanitaria Provinciale, ASL,
-  Casa di Cura, Clinica, Policlinico, Istituto, Fondazione.
-- Riporta il nome completo della struttura, con l'eventuale citta'.
-- NON confondere la struttura con il produttore dei dispositivi
-  (es. Zimmer Biomet): quello NON e' il cliente.
-- Se davvero assente, usa "".
-
-2. DATA -> campo "data"
-- E' la data dell'intervento/documento. Formato SEMPRE italiano
-  (giorno/mese/anno): GG/MM/AAAA o GG/MM/AA, separatori possibili / - . ,
-  giorno e mese anche a UNA cifra (es. 5/1/26). Spesso scritta a mano.
-- Etichette tipiche vicino alla data: Data, Data intervento, Data ricovero,
-  del, li.
-- Se nel documento ci sono piu' date, scegli quella dell'intervento o del
-  documento, MAI la data di nascita del paziente.
-- Restituisci la stringa ESATTAMENTE come appare: NON convertirla, NON
-  reinterpretare giorno e mese, NON completare l'anno.
-- Esempi: "21/12/26" -> "21/12/26" | "05-01-2025" -> "05-01-2025" |
-  "5/1/26" -> "5/1/26" | "13.02.26" -> "13.02.26"
-- Se non trovi nessuna data, usa "".
-
-3. PAZIENTE -> campo "iniziali_paziente"
-- Etichette possibili: Iniziali Paziente, Paziente, Paz., Pz., Sig., Sig.ra,
-  Nome, Cognome. Quasi sempre SCRITTO A MANO, spesso con tratto leggero:
-  guarda con molta attenzione lo spazio subito dopo la dicitura.
-- Se trovi il nome per esteso NON riportarlo: restituisci SOLO le iniziali
-  (prima lettera di nome e cognome). Es. "Mario Rossi" -> "M.R."
-- Se trovi gia' delle iniziali (es. "M.R.", "MR", "R.S."), riportale cosi'.
-- NON confondere il paziente con il "Medico Operatore" (anche lui scritto a
-  mano, in un campo vicino): il medico NON va mai riportato.
-- Se davvero illeggibile o assente, usa "".
-
-4. CARTELLA CLINICA -> campo "cartella_clinica"
-- Etichette possibili: Cartella, Cartella clinica, C.C., CC, N. cartella,
-  SDO, Nosologico. E' un numero, a volte con l'anno (es. 1353/26).
-- Se assente, usa "".
-
-5. DISPOSITIVI -> campo "righe" (una riga per etichetta dispositivo)
-- PROCEDI IN DUE PASSI. Primo: CONTA quanti bollini adesivi ci sono nel
-  foglio (riquadri bianchi con codice a barre e logo del produttore),
-  esaminando TUTTO il foglio: bordi, angoli, bollini ruotati o storti,
-  parzialmente sovrapposti. Secondo: estrai una riga per CIASCUN bollino
-  contato. Il numero di righe deve corrispondere al conteggio (salvo
-  bollini con stesso REF+LOT, che diventano una riga con la quantita'
-  sommata). Se un bollino e' troppo rovinato, mettilo comunque con i campi
-  che riesci a leggere.
-- Per ogni etichetta: REF (codice articolo), LOT (lotto), description.
-- Description: breve (2-4 parole), la parte piu' importante e leggibile;
-  se presente una misura utile (es. 71mm, 60mm, 10mm), includila.
-- Ignora UDI, barcode, GTIN, EDI, indirizzi, materiali e codici lunghi.
-- Se il lotto manca, usa stringa vuota.
-
-Rispondi SOLO con JSON valido in questo formato:
+Rispondi SOLO JSON valido in questo formato:
 {
   "cliente": "nome struttura",
-  "data": "GG/MM/AA o GG/MM/AAAA cosi' come appare",
-  "iniziali_paziente": "M.R.",
+  "data": "DD/MM/YY o DD/MM/YYYY (raw)",
+  "iniziali_paziente": "XX",
   "cartella_clinica": "12345",
   "righe": [
     {
@@ -122,13 +71,13 @@ Rispondi SOLO con JSON valido in questo formato:
     }
   ]
 }
+
+Esempi data:
+21/12/26 -> "21/12/26"
+05/01/2025 -> "05/01/2025"
 `
       : `
 Analizza questa etichetta di protesi ortopedica tramite OCR.
-
-ORIENTAMENTO: la foto puo' essere ruotata di 90, 180 o 270 gradi o storta.
-Se il testo appare in verticale o capovolto, ruota mentalmente l'immagine
-e leggila comunque: non rispondere con campi vuoti solo per la rotazione.
 
 Obiettivo: estrarre SOLO questi campi:
 - REF (codice articolo)
@@ -205,12 +154,9 @@ Rispondi SOLO JSON valido:
       ]
     };
 
-    // gpt-5 ragiona prima di rispondere: "low" e' il compromesso misurato
-    // sul campo — "medium" aggiungeva ~15s a scansione per un guadagno di
-    // accuratezza non percepibile (il lavoro grosso lo fa detail: high).
-    // "minimal" e' il compromesso misurato: ~7-10s a scansione (contro ~27
-    // con "medium") senza perdita di accuratezza sul foglio di prova. Il
-    // grosso dell'accuratezza viene da detail: high sull'immagine.
+    // gpt-5 ragiona prima di rispondere: "minimal" tiene l'attesa a ~8s
+    // (con "medium" saliva a ~27s). Non e' una manopola del prompt: e' solo
+    // velocita'.
     if (OCR_MODEL.startsWith("gpt-5")) {
       richiesta.reasoning = { effort: "minimal" };
     }

@@ -706,38 +706,17 @@ async function ruotaBase64(imageBase64, gradi) {
   return canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
 
-// Una singola chiamata OCR: null se il server o il modello falliscono
-// (l'errore non e' definitivo, si puo' ritentare con la foto ruotata).
+// Una singola chiamata OCR. La rotazione, se serve, la decide l'utente con
+// i tasti sull'anteprima prima di avviare: niente tentativi automatici.
 async function tentaOcr(imageBase64, mode) {
-  try {
-    const body = mode ? { imageBase64, mode } : { imageBase64 };
-    const response = await fetch(OCR_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) return null;
-    return await response.json();
-  } catch (err) {
-    console.error('Tentativo OCR fallito:', err);
-    return null;
-  }
-}
-
-// Le foto arrivano spesso ruotate di 90 gradi (documento in orizzontale,
-// telefono in verticale): se il primo tentativo non cava nulla, si riprova
-// con l'immagine ruotata prima di arrendersi.
-async function ocrConRotazioni(imageBase64, mode, risultatoVuoto) {
-  const tentativi = [0, 90, 270];
-
-  for (const gradi of tentativi) {
-    if (gradi !== 0) setOcrStatus(`Foto forse ruotata: riprovo (${gradi}°)...`);
-    const base = gradi === 0 ? imageBase64 : await ruotaBase64(imageBase64, gradi);
-    const result = await tentaOcr(base, mode);
-    if (result && !risultatoVuoto(result)) return result;
-  }
-
-  return null;
+  const body = mode ? { imageBase64, mode } : { imageBase64 };
+  const response = await fetch(OCR_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`OCR HTTP ${response.status}`);
+  return response.json();
 }
 
 function startOcrForRow(row, source = 'camera') {
@@ -840,8 +819,7 @@ async function handleOcrFileChange(event) {
       ocrPreview.hidden = false;
     }
     setOcrStatus('OCR in corso...');
-    const result = await ocrConRotazioni(imageBase64, null,
-      (r) => !String(r?.ref || '').trim() && !String(r?.lot || '').trim());
+    const result = await tentaOcr(imageBase64, null);
 
     const ref = String(result?.ref || '').trim();
     const lot = String(result?.lot || '').trim();
@@ -941,12 +919,7 @@ async function avviaOcrScarico() {
 
   try {
     setOcrStatus('OCR in corso...');
-    const result = await ocrConRotazioni(imageBase64, 'document',
-      (r) => !(r?.righe || []).length && !String(r?.cliente || '').trim() && !String(r?.data || '').trim());
-
-    if (!result) {
-      throw new Error('Nessun tentativo OCR riuscito');
-    }
+    const result = await tentaOcr(imageBase64, 'document');
     applyScaricoDataToForm(result);
   } catch (error) {
     console.error('Errore OCR scarico documento:', error);
