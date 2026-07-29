@@ -1,5 +1,10 @@
 import OpenAI from "openai";
 
+// Modello vision. "gpt-5" e' il principale; per tornare a "gpt-4.1-mini"
+// (piu' economico) basta cambiare qui. Nota: il parametro reasoning vale
+// solo per i modelli gpt-5 e viene applicato solo a quelli.
+const OCR_MODEL = "gpt-5";
+
 export default async function handler(req, res) {
 
   // CORS headers
@@ -383,11 +388,8 @@ Rispondi SOLO JSON valido:
 }
 `;
 
-    const response = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      reasoning: {
-        effort: "low"
-      },
+    const richiesta = {
+      model: OCR_MODEL,
       input: [
         {
           role: "user",
@@ -400,7 +402,14 @@ Rispondi SOLO JSON valido:
           ]
         }
       ]
-    });
+    };
+
+    // reasoning solo per gpt-5: con gpt-4.1-mini l'API risponde 400.
+    if (OCR_MODEL.startsWith("gpt-5")) {
+      richiesta.reasoning = { effort: "low" };
+    }
+
+    const response = await openai.responses.create(richiesta);
 
     const outputText = response.output_text;
 
